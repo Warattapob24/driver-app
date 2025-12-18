@@ -75,7 +75,7 @@ st.title("🚗 ระบบบันทึกรายได้")
 tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล"])
 
 # ==========================================
-# TAB 1: บันทึกงาน (เหมือนเดิมเป๊ะ)
+# TAB 1: บันทึกงาน (แก้ไขตามที่คุณต้องการ)
 # ==========================================
 with tab1:
     col_type, col_form = st.columns([1, 2])
@@ -93,23 +93,38 @@ with tab1:
             st.markdown("#### 📝 บันทึกรายได้")
             with st.form(key="form_income", clear_on_submit=True):
                 platform = st.selectbox("เลือกแอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"])
+                
                 c1, c2 = st.columns(2)
-                with c1: app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
-                with c2: real_receive = st.number_input("เงินรับจริง (เฉพาะทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
+                # ใช้ value=None และ placeholder เพื่อให้ช่องเป็นสีเทาจางๆ และพิมพ์ได้เลย
+                with c1: 
+                    app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
+                with c2: 
+                    # เปลี่ยนกลับเป็น "รวมทิป" แบบเดิมที่คุณเข้าใจ
+                    real_receive = st.number_input("เงินรับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
+                
                 note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
                 submitted = st.form_submit_button("บันทึกรายได้ ✅", type="primary", use_container_width=True)
+                
                 if submitted:
+                    # แปลงค่าว่างให้เป็น 0 เพื่อคำนวณ
                     price_val = app_price if app_price is not None else 0.0
                     real_val = real_receive if real_receive is not None else 0.0
+                    
                     if price_val > 0 or real_val > 0:
+                        # ถ้าไม่กรอกเงินรับจริง ให้ถือว่าเท่ากับหน้าแอป
                         if real_val == 0: real_val = price_val 
+                        
                         deduction = 0
                         tip = max(0, real_val - price_val)
-                        if platform in ["Maxim", "งานนอก"]:
+                        
+                        # --- แก้ไขตรงนี้ครับ: หัก % เฉพาะ Maxim เท่านั้น ---
+                        if platform == "Maxim":
                             deduction = price_val * maxim_comm_rate
                             net_income = price_val - deduction + tip
                         else:
+                            # งานนอก, Grab, Bolt ฯลฯ ไม่หัก % (รับเต็ม)
                             net_income = price_val + tip 
+                        
                         new_row = {
                             'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                             'แอป': platform, 'หมวดหมู่': 'รายรับ', 'รายการ': 'ค่าโดยสาร',
@@ -118,7 +133,7 @@ with tab1:
                         }
                         st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
                         save_data(st.session_state.data)
-                        st.toast(f"บันทึกสำเร็จ! กำไร {net_income:.0f} บาท")
+                        st.toast(f"บันทึกสำเร็จ! เข้ากระเป๋า {net_income:.0f} บาท")
                         st.rerun()
                     else:
                         st.warning("กรุณากรอกยอดเงิน")
@@ -130,6 +145,7 @@ with tab1:
                 e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
                 default_val = None
                 if e_type == "⚡ ชาร์จบ้าน (เหมา)": default_val = float(ev_home_rate)
+                
                 cost = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, value=default_val, placeholder="0.00")
                 note = st.text_input("สถานที่")
                 submitted = st.form_submit_button("บันทึกค่าใช้จ่าย 💾", type="primary", use_container_width=True)
@@ -206,81 +222,52 @@ with tab1:
     st.markdown("<br>" * 10, unsafe_allow_html=True)
 
 # ==========================================
-# TAB 2: สรุปผล (อัปเกรด: เพิ่มประวัติและเลือกวันที่)
+# TAB 2: สรุปผล (คงไว้แบบที่คุณชอบ: ประวัติละเอียด)
 # ==========================================
 with tab2:
     st.markdown("### 📊 แดชบอร์ดสรุปผลละเอียด")
-    
-    # 1. แถวตัวเลือกช่วงเวลา
-    # เพิ่ม "เมื่อวาน", "เดือนที่แล้ว", และ "กำหนดเอง"
     time_filter = st.selectbox(
         "📅 เลือกช่วงเวลาที่ต้องการดู:",
         ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง (เลือกวันที่)"]
     )
     
-    # 2. ส่วนของตัวเลือกกำหนดเอง (จะโผล่มาเมื่อเลือก "กำหนดเอง")
     custom_start_date = None
     custom_end_date = None
-    
     if time_filter == "กำหนดเอง (เลือกวันที่)":
         st.info("👇 จิ้มที่ช่องวันที่ เพื่อเลือกช่วงเวลาเริ่มต้น-สิ้นสุด")
-        date_range = st.date_input(
-            "ระบุช่วงวันที่:",
-            value=(get_thai_date(), get_thai_date()),
-            max_value=get_thai_date()
-        )
-        if len(date_range) == 2:
-            custom_start_date, custom_end_date = date_range
+        date_range = st.date_input("ระบุช่วงวันที่:", value=(get_thai_date(), get_thai_date()), max_value=get_thai_date())
+        if len(date_range) == 2: custom_start_date, custom_end_date = date_range
     
     df = st.session_state.data
     if not df.empty:
         today = get_thai_date()
         filtered_df = df.copy()
         
-        # --- Logic การกรองวันที่ (ละเอียด) ---
-        if time_filter == "วันนี้":
-            filtered_df = df[df['วันที่'] == today]
-            
-        elif time_filter == "เมื่อวาน":
-            yesterday = today - datetime.timedelta(days=1)
-            filtered_df = df[df['วันที่'] == yesterday]
-            
+        if time_filter == "วันนี้": filtered_df = df[df['วันที่'] == today]
+        elif time_filter == "เมื่อวาน": filtered_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
         elif time_filter == "สัปดาห์นี้":
             start_week = today - datetime.timedelta(days=today.weekday())
             end_week = start_week + datetime.timedelta(days=6)
             filtered_df = df[(df['วันที่'] >= start_week) & (df['วันที่'] <= end_week)]
-            
-        elif time_filter == "เดือนนี้":
-            filtered_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
-            
+        elif time_filter == "เดือนนี้": filtered_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
         elif time_filter == "เดือนที่แล้ว":
-            # หาวันแรกของเดือนนี้ แล้วถอยไป 1 วันจะได้วันสิ้นเดือนที่แล้ว
-            first_day_this_month = today.replace(day=1)
-            last_day_prev_month = first_day_this_month - datetime.timedelta(days=1)
-            start_prev_month = last_day_prev_month.replace(day=1)
-            filtered_df = df[(df['วันที่'] >= start_prev_month) & (df['วันที่'] <= last_day_prev_month)]
-            
-        elif time_filter == "ปีนี้":
-            filtered_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
-            
-        elif time_filter == "กำหนดเอง (เลือกวันที่)":
-            if custom_start_date and custom_end_date:
-                filtered_df = df[(df['วันที่'] >= custom_start_date) & (df['วันที่'] <= custom_end_date)]
-            else:
-                filtered_df = pd.DataFrame() # ถ้ายังเลือกไม่ครบ ให้ว่างไว้ก่อน
+            first_day = today.replace(day=1)
+            last_day_prev = first_day - datetime.timedelta(days=1)
+            start_prev = last_day_prev.replace(day=1)
+            filtered_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_day_prev)]
+        elif time_filter == "ปีนี้": filtered_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
+        elif time_filter == "กำหนดเอง (เลือกวันที่)" and custom_start_date:
+            filtered_df = df[(df['วันที่'] >= custom_start_date) & (df['วันที่'] <= custom_end_date)]
+        elif time_filter == "กำหนดเอง (เลือกวันที่)": filtered_df = pd.DataFrame()
 
-        # --- แสดงผล ---
         if not filtered_df.empty:
-            # คำนวณระยะทาง
             odom_df = filtered_df[filtered_df['เลขไมล์'] > 0]
             daily_dist = 0
             if not odom_df.empty:
                 daily_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
-                daily_odom['run_dist'] = daily_odom['max'] - daily_odom['min']
-                daily_dist = daily_odom['run_dist'].sum()
+                daily_dist = (daily_odom['max'] - daily_odom['min']).sum()
             total_km = daily_dist if daily_dist > 0 else filtered_df['ระยะทาง(กม.)'].sum()
 
-            # คำนวณเงิน
             inc_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายรับ']
             exp_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายจ่าย']
             
@@ -289,9 +276,7 @@ with tab2:
             other = exp_df[exp_df['รายการ'] == 'ทั่วไป']['หัก/จ่าย'].sum()
             net = total_inc - fuel - other
 
-            # หัวข้อสรุป
             st.caption(f"สรุปยอด: {time_filter}")
-            
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 กำไรสุทธิ", f"{net:,.0f}")
             m2.metric("⛽ น้ำมัน/ไฟ", f"{fuel:,.0f}")
@@ -300,16 +285,14 @@ with tab2:
             else: m4.metric("📊 บาท/กม.", "-")
 
             st.divider()
-            
-            # แสดงรายการย่อย (เฉพาะถ้าเลือกวันเดียว หรือ เมื่อวาน จะได้เช็คยอดได้ง่ายๆ)
             if time_filter in ["วันนี้", "เมื่อวาน"]:
-                with st.expander("ดูรายการรายรับทั้งหมดของวันนี้/เมื่อวาน"):
+                with st.expander("ดูรายการย่อย"):
                     st.dataframe(inc_df[['เวลา', 'แอป', 'คงเหลือ/สุทธิ', 'หมายเหตุ']], use_container_width=True)
 
             c1, c2 = st.columns(2)
             with c1:
                 if not inc_df.empty:
-                    fig = px.bar(inc_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index(), x='แอป', y='คงเหลือ/สุทธิ', color='แอป', text_auto=True, title=f"รายได้แยกแอป ({time_filter})")
+                    fig = px.bar(inc_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index(), x='แอป', y='คงเหลือ/สุทธิ', color='แอป', text_auto=True, title=f"รายได้แยกแอป")
                     st.plotly_chart(fig, use_container_width=True)
             with c2:
                 if not inc_df.empty:
@@ -317,10 +300,7 @@ with tab2:
                     fig = px.histogram(inc_df, x='Hour', y='คงเหลือ/สุทธิ', nbins=24, title=f"ช่วงเวลาทำเงิน", color_discrete_sequence=['#FF4B4B'])
                     st.plotly_chart(fig, use_container_width=True)
         else:
-            if time_filter == "กำหนดเอง (เลือกวันที่)" and (not custom_start_date):
-                st.info("กรุณาเลือกวันที่จากปฏิทินด้านบน")
-            else:
-                st.warning(f"ไม่พบข้อมูลในช่วง: {time_filter}")
+            st.warning(f"ไม่พบข้อมูลในช่วง: {time_filter}")
     else:
         st.info("ยังไม่มีข้อมูลในระบบ")
 
