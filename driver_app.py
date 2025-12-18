@@ -379,4 +379,57 @@ with tab2:
             m1.metric("💰 กำไรสุทธิ (บัญชี)", f"{net:,.0f}", help="รายได้ - ค่าใช้จ่ายจริง (ไม่เกี่ยวกับเงินสด)")
             m2.metric("📉 เครดิตแอป", f"{total_wallet_change:+,.0f}", help="ถ้าติดลบ คือโดนหักค่าคอมเยอะ/เติมเงิน")
             m3.metric("🛣️ วิ่ง(กม.)", f"{total_km:,.0f}")
-            m4.metric("⏱️ เวลางาน", f"{total_hours
+            m4.metric("⏱️ เวลางาน", f"{total_hours:.1f} ชม.")
+            
+            st.divider()
+            s1, s2 = st.columns(2)
+            if total_km > 0: s1.metric("📊 รายได้/กม.", f"{total_inc/total_km:.1f} บ.")
+            if total_hours > 0: s2.metric("💵 รายได้/ชม.", f"{total_inc/total_hours:.0f} บ.")
+            
+            st.divider()
+            c1, c2 = st.columns(2)
+            with c1:
+                if not inc_df.empty: st.plotly_chart(px.bar(inc_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index(), x='แอป', y='คงเหลือ/สุทธิ', color='แอป', text_auto=True), use_container_width=True)
+            with c2:
+                if not inc_df.empty:
+                    inc_df['Hour'] = pd.to_datetime(inc_df['เวลา'], format='%H:%M').dt.hour
+                    st.plotly_chart(px.histogram(inc_df, x='Hour', y='คงเหลือ/สุทธิ', nbins=24, title="ช่วงเวลาทำเงิน", color_discrete_sequence=['#FF4B4B']), use_container_width=True)
+
+        else: st.warning(f"ไม่พบข้อมูล: {time_filter}")
+    else: st.info("ยังไม่มีข้อมูล")
+
+# ==========================================
+# TAB 3: ฐานข้อมูล (Smart Filters + Memory)
+# ==========================================
+with tab3:
+    st.subheader("🗂️ ฐานข้อมูล (ค้นหาและแก้ไข)")
+    with st.container(border=True):
+        st.write("🔍 **ตัวกรองค้นหา**")
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1: f_app = st.multiselect("เลือกแอป:", options=st.session_state.data['แอป'].unique(), default=[], key="db_app_filter")
+        with fc2: f_cat = st.multiselect("หมวดหมู่:", options=st.session_state.data['หมวดหมู่'].unique(), default=[], key="db_cat_filter")
+        with fc3: f_date_mode = st.selectbox("ช่วงวันที่:", ["ทั้งหมด", "วันนี้", "เดือนนี้", "กำหนดเอง"], key="db_date_mode")
+    
+    view_df = st.session_state.data.copy()
+    if f_app: view_df = view_df[view_df['แอป'].isin(f_app)]
+    if f_cat: view_df = view_df[view_df['หมวดหมู่'].isin(f_cat)]
+    
+    today = get_thai_date()
+    if f_date_mode == "วันนี้": view_df = view_df[view_df['วันที่'] == today]
+    elif f_date_mode == "เดือนนี้": view_df = view_df[(pd.to_datetime(view_df['วันที่']).dt.month == today.month) & (pd.to_datetime(view_df['วันที่']).dt.year == today.year)]
+    elif f_date_mode == "กำหนดเอง":
+        d_range = st.date_input("เลือกช่วง:", value=(today, today), key="db_custom_date")
+        if len(d_range) == 2: view_df = view_df[(view_df['วันที่'] >= d_range[0]) & (view_df['วันที่'] <= d_range[1])]
+
+    st.caption(f"พบข้อมูล: {len(view_df)} รายการ")
+    if not view_df.empty:
+        # แสดงคอลัมน์สำคัญก่อน
+        cols_to_show = [c for c in view_df.columns if c in ['วันที่', 'เวลา', 'แอป', 'รายการ', 'ช่องทางรับเงิน', 'ยอดเต็ม/หน้าแอป', 'คงเหลือ/สุทธิ', 'เงินสดเข้าตัว', 'หมายเหตุ']]
+        edited_view = st.data_editor(view_df[cols_to_show].sort_values(by=["วันที่", "เวลา"], ascending=False), num_rows="dynamic", use_container_width=True, key="data_editor_view")
+        
+        if st.button("💾 บันทึกการแก้ไข (ในตารางที่กรอง)", type="primary"):
+            st.session_state.data.update(edited_view)
+            save_data(st.session_state.data)
+            st.success("บันทึกข้อมูลเรียบร้อยแล้ว!")
+            st.rerun()
+    else: st.info("ไม่พบข้อมูลตามเงื่อนไข")
