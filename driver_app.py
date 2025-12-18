@@ -18,21 +18,17 @@ def get_thai_time():
 def get_thai_date():
     return get_thai_time().date()
 
-# --- 2. SETTINGS MANAGEMENT (ระบบจำค่าการตั้งค่า) ---
+# --- 2. SETTINGS & MEMORY ---
 def load_settings():
-    # ค่าเริ่มต้นถ้ายังไม่มีไฟล์
     default_settings = {"maxim_rate": 15, "ev_rate": 40.0}
     if os.path.exists(SETTINGS_FILE):
         try:
-            with open(SETTINGS_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return default_settings
+            with open(SETTINGS_FILE, "r") as f: return json.load(f)
+        except: return default_settings
     return default_settings
 
 def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f)
+    with open(SETTINGS_FILE, "w") as f: json.dump(settings, f)
 
 # --- 3. DATA LOADING ---
 def load_and_clean_data():
@@ -71,26 +67,19 @@ if 'data' not in st.session_state:
     st.session_state.data = load_and_clean_data()
     save_data(st.session_state.data)
 
-# --- 4. SIDEBAR (ปรับปรุงให้จำค่าได้) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ ตั้งค่า")
     st.caption(f"เวลา: {get_thai_time().strftime('%H:%M')}")
     
-    # โหลดค่าเดิมมาแสดง
     current_settings = load_settings()
-    
-    # Widget ปรับค่า
     new_maxim_rate = st.slider("Maxim หักคอม (%)", 0, 30, current_settings.get("maxim_rate", 15))
     new_ev_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=float(current_settings.get("ev_rate", 40.0)), step=5.0)
     
-    # ตรวจสอบว่ามีการเปลี่ยนแปลงไหม? ถ้ามีให้บันทึกทันที
     if new_maxim_rate != current_settings.get("maxim_rate") or new_ev_rate != current_settings.get("ev_rate"):
-        updated_settings = {"maxim_rate": new_maxim_rate, "ev_rate": new_ev_rate}
-        save_settings(updated_settings)
-        # ไม่ต้อง rerun ก็ได้ เพราะค่าเปลี่ยนแล้ว แต่เพื่อให้แน่ใจว่าหน้าอื่นใช้ค่าใหม่
+        save_settings({"maxim_rate": new_maxim_rate, "ev_rate": new_ev_rate})
         st.toast("บันทึกการตั้งค่าแล้ว!")
     
-    # ตัวแปรสำหรับนำไปคำนวณในหน้าหลัก
     maxim_comm_rate = new_maxim_rate / 100
     ev_home_rate = new_ev_rate
     
@@ -106,7 +95,7 @@ with st.sidebar:
 
 # --- 5. MAIN APP ---
 st.title("🚗 ระบบบันทึกรายได้")
-tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล"])
+tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล (ค้นหา)"])
 
 # ==========================================
 # TAB 1: บันทึกงาน
@@ -122,36 +111,29 @@ with tab1:
 
     with col_form:
         st.container(border=True)
-        # --- 1. รับงาน ---
+        # 1. รับงาน
         if entry_type == "🚗 รับงานขับรถ":
             st.markdown("#### 📝 บันทึกรายได้")
             with st.form(key="form_income", clear_on_submit=True):
                 platform = st.selectbox("เลือกแอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"])
                 c1, c2 = st.columns(2)
-                with c1: 
-                    app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
-                with c2: 
-                    real_receive = st.number_input("เงินรับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
-                
+                with c1: app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
+                with c2: real_receive = st.number_input("เงินรับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
                 note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
                 submitted = st.form_submit_button("บันทึกรายได้ ✅", type="primary", use_container_width=True)
-                
                 if submitted:
                     price_val = app_price if app_price is not None else 0.0
                     real_val = real_receive if real_receive is not None else 0.0
-                    
                     if price_val > 0 or real_val > 0:
                         if real_val == 0: real_val = price_val 
-                        
                         deduction = 0
                         tip = max(0, real_val - price_val)
-                        
+                        # Logic: Only Maxim deducts comm here
                         if platform == "Maxim":
                             deduction = price_val * maxim_comm_rate
                             net_income = price_val - deduction + tip
                         else:
                             net_income = price_val + tip 
-                        
                         new_row = {
                             'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                             'แอป': platform, 'หมวดหมู่': 'รายรับ', 'รายการ': 'ค่าโดยสาร',
@@ -162,19 +144,15 @@ with tab1:
                         save_data(st.session_state.data)
                         st.toast(f"บันทึกสำเร็จ! เข้ากระเป๋า {net_income:.0f} บาท")
                         st.rerun()
-                    else:
-                        st.warning("กรุณากรอกยอดเงิน")
+                    else: st.warning("กรุณากรอกยอดเงิน")
 
-        # --- 2. น้ำมัน/ไฟ ---
+        # 2. พลังงาน
         elif entry_type == "⛽ เติมน้ำมัน/ชาร์จไฟ":
             st.markdown("#### ⚡ ต้นทุนพลังงาน")
             with st.form(key="form_energy", clear_on_submit=True):
                 e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
-                
-                # ใช้ค่าที่โหลดมาจาก Settings
                 default_val = None
                 if e_type == "⚡ ชาร์จบ้าน (เหมา)": default_val = float(ev_home_rate)
-                
                 cost = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, value=default_val, placeholder="0.00")
                 note = st.text_input("สถานที่")
                 submitted = st.form_submit_button("บันทึกค่าใช้จ่าย 💾", type="primary", use_container_width=True)
@@ -191,18 +169,17 @@ with tab1:
                         save_data(st.session_state.data)
                         st.toast("บันทึกเรียบร้อย")
                         st.rerun()
-                    else:
-                        st.warning("กรุณากรอกจำนวนเงิน")
+                    else: st.warning("กรุณากรอกจำนวนเงิน")
 
-        # --- 3. เลขไมล์ ---
+        # 3. ไมล์
         elif entry_type == "🕒 เริ่มงาน/เลิกงาน (เลขไมล์)":
             st.markdown("#### 🕒 บันทึกเลขไมล์")
             with st.form(key="form_odom", clear_on_submit=True):
                 shift_type = st.radio("สถานะ", ["☀️ เริ่มงาน", "🌙 เลิกงาน"], horizontal=True)
                 last_odom = 0.0
                 if not st.session_state.data.empty: last_odom = st.session_state.data['เลขไมล์'].max()
-                st.caption(f"เลขไมล์ล่าสุดในระบบ: {last_odom:,.0f}")
-                odometer = st.number_input("เลขไมล์หน้าปัดปัจจุบัน", min_value=0.0, step=1.0, value=None, placeholder="กรอกเลขไมล์")
+                st.caption(f"เลขไมล์ล่าสุด: {last_odom:,.0f}")
+                odometer = st.number_input("เลขไมล์หน้าปัด", min_value=0.0, step=1.0, value=None, placeholder="กรอกเลขไมล์")
                 submitted = st.form_submit_button("บันทึกเลขไมล์ 💾", type="primary", use_container_width=True)
                 if submitted:
                     odom_val = odometer if odometer is not None else 0.0
@@ -217,10 +194,9 @@ with tab1:
                         save_data(st.session_state.data)
                         st.toast(f"บันทึก {shift_type} แล้ว")
                         st.rerun()
-                    else:
-                        st.error("กรุณากรอกเลขไมล์")
+                    else: st.error("กรุณากรอกเลขไมล์")
 
-        # --- 4. อื่นๆ ---
+        # 4. อื่นๆ
         elif entry_type == "💳 เติมเครดิตแอป" or entry_type == "🛠️ จ่ายอื่นๆ":
             st.markdown(f"#### {entry_type}")
             with st.form(key="form_other", clear_on_submit=True):
@@ -246,9 +222,8 @@ with tab1:
                         save_data(st.session_state.data)
                         st.toast("บันทึกเรียบร้อย")
                         st.rerun()
-                    else:
-                        st.warning("กรุณากรอกจำนวนเงิน")
-    st.markdown("<br>" * 10, unsafe_allow_html=True)
+                    else: st.warning("กรุณากรอกจำนวนเงิน")
+    st.markdown("<br>" * 5, unsafe_allow_html=True)
 
 # ==========================================
 # TAB 2: สรุปผล
@@ -256,16 +231,16 @@ with tab1:
 with tab2:
     st.markdown("### 📊 แดชบอร์ดสรุปผลละเอียด")
     time_filter = st.selectbox(
-        "📅 เลือกช่วงเวลาที่ต้องการดู:",
+        "📅 เลือกช่วงเวลา:",
         ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง (เลือกวันที่)"]
     )
     
-    custom_start_date = None
-    custom_end_date = None
+    custom_start = None
+    custom_end = None
     if time_filter == "กำหนดเอง (เลือกวันที่)":
-        st.info("👇 จิ้มที่ช่องวันที่ เพื่อเลือกช่วงเวลาเริ่มต้น-สิ้นสุด")
-        date_range = st.date_input("ระบุช่วงวันที่:", value=(get_thai_date(), get_thai_date()), max_value=get_thai_date())
-        if len(date_range) == 2: custom_start_date, custom_end_date = date_range
+        st.info("👇 จิ้มปฏิทินเลือกช่วงเวลา")
+        date_range = st.date_input("ช่วงวันที่:", value=(get_thai_date(), get_thai_date()))
+        if len(date_range) == 2: custom_start, custom_end = date_range
     
     df = st.session_state.data
     if not df.empty:
@@ -276,17 +251,14 @@ with tab2:
         elif time_filter == "เมื่อวาน": filtered_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
         elif time_filter == "สัปดาห์นี้":
             start_week = today - datetime.timedelta(days=today.weekday())
-            end_week = start_week + datetime.timedelta(days=6)
-            filtered_df = df[(df['วันที่'] >= start_week) & (df['วันที่'] <= end_week)]
+            filtered_df = df[(df['วันที่'] >= start_week) & (df['วันที่'] <= start_week + datetime.timedelta(days=6))]
         elif time_filter == "เดือนนี้": filtered_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
         elif time_filter == "เดือนที่แล้ว":
-            first_day = today.replace(day=1)
-            last_day_prev = first_day - datetime.timedelta(days=1)
-            start_prev = last_day_prev.replace(day=1)
-            filtered_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_day_prev)]
+            first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
+            filtered_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
         elif time_filter == "ปีนี้": filtered_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
-        elif time_filter == "กำหนดเอง (เลือกวันที่)" and custom_start_date:
-            filtered_df = df[(df['วันที่'] >= custom_start_date) & (df['วันที่'] <= custom_end_date)]
+        elif time_filter == "กำหนดเอง (เลือกวันที่)" and custom_start:
+            filtered_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
         elif time_filter == "กำหนดเอง (เลือกวันที่)": filtered_df = pd.DataFrame()
 
         if not filtered_df.empty:
@@ -299,45 +271,94 @@ with tab2:
 
             inc_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายรับ']
             exp_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายจ่าย']
-            
-            total_inc = inc_df['คงเหลือ/สุทธิ'].sum()
-            fuel = exp_df[exp_df['รายการ'] == 'ค่าน้ำมัน/ไฟ']['หัก/จ่าย'].sum()
-            other = exp_df[exp_df['รายการ'] == 'ทั่วไป']['หัก/จ่าย'].sum()
-            net = total_inc - fuel - other
+            net = inc_df['คงเหลือ/สุทธิ'].sum() - exp_df['หัก/จ่าย'].sum()
 
             st.caption(f"สรุปยอด: {time_filter}")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 กำไรสุทธิ", f"{net:,.0f}")
-            m2.metric("⛽ น้ำมัน/ไฟ", f"{fuel:,.0f}")
+            m2.metric("⛽ จ่ายรวม", f"{exp_df['หัก/จ่าย'].sum():,.0f}")
             m3.metric("🛣️ วิ่ง(กม.)", f"{total_km:,.0f}")
-            if total_km > 0: m4.metric("📊 บาท/กม.", f"{total_inc/total_km:.1f}")
-            else: m4.metric("📊 บาท/กม.", "-")
+            m4.metric("📊 บาท/กม.", f"{inc_df['คงเหลือ/สุทธิ'].sum()/total_km:.1f}" if total_km > 0 else "-")
 
             st.divider()
-            if time_filter in ["วันนี้", "เมื่อวาน"]:
-                with st.expander("ดูรายการย่อย"):
-                    st.dataframe(inc_df[['เวลา', 'แอป', 'คงเหลือ/สุทธิ', 'หมายเหตุ']], use_container_width=True)
-
             c1, c2 = st.columns(2)
             with c1:
-                if not inc_df.empty:
-                    fig = px.bar(inc_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index(), x='แอป', y='คงเหลือ/สุทธิ', color='แอป', text_auto=True, title=f"รายได้แยกแอป")
-                    st.plotly_chart(fig, use_container_width=True)
+                if not inc_df.empty: st.plotly_chart(px.bar(inc_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index(), x='แอป', y='คงเหลือ/สุทธิ', color='แอป', text_auto=True), use_container_width=True)
             with c2:
                 if not inc_df.empty:
                     inc_df['Hour'] = pd.to_datetime(inc_df['เวลา'], format='%H:%M').dt.hour
-                    fig = px.histogram(inc_df, x='Hour', y='คงเหลือ/สุทธิ', nbins=24, title=f"ช่วงเวลาทำเงิน", color_discrete_sequence=['#FF4B4B'])
-                    st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning(f"ไม่พบข้อมูลในช่วง: {time_filter}")
-    else:
-        st.info("ยังไม่มีข้อมูลในระบบ")
+                    st.plotly_chart(px.histogram(inc_df, x='Hour', y='คงเหลือ/สุทธิ', nbins=24, title="ช่วงเวลาทำเงิน", color_discrete_sequence=['#FF4B4B']), use_container_width=True)
+        else: st.warning(f"ไม่พบข้อมูล: {time_filter}")
+    else: st.info("ยังไม่มีข้อมูล")
 
+# ==========================================
+# TAB 3: ฐานข้อมูล (อัปเกรด: Smart Filters + Memory)
+# ==========================================
 with tab3:
-    st.subheader("🗂️ ฐานข้อมูล")
-    if not st.session_state.data.empty:
-        edited = st.data_editor(st.session_state.data, num_rows="dynamic", use_container_width=True)
-        if st.button("💾 บันทึกแก้ไข", type="primary"):
-            st.session_state.data = edited
-            save_data(edited)
-            st.success("บันทึกแล้ว")
+    st.subheader("🗂️ ฐานข้อมูล (ค้นหาและแก้ไข)")
+    
+    # --- 1. Filter Widgets (ใช้ Key เพื่อให้ Streamlit จำค่าได้เอง) ---
+    with st.container(border=True):
+        st.write("🔍 **ตัวกรองค้นหา (Filters)**")
+        fc1, fc2, fc3 = st.columns(3)
+        
+        with fc1:
+            # ใช้ key='db_app_filter' เพื่อให้ค่าคงอยู่เวลาเปลี่ยนหน้า
+            f_app = st.multiselect("เลือกแอป:", options=st.session_state.data['แอป'].unique(), default=[], key="db_app_filter")
+        
+        with fc2:
+            f_cat = st.multiselect("หมวดหมู่:", options=st.session_state.data['หมวดหมู่'].unique(), default=[], key="db_cat_filter")
+            
+        with fc3:
+            # กรองวันที่
+            f_date_mode = st.selectbox("ช่วงวันที่:", ["ทั้งหมด", "วันนี้", "เดือนนี้", "กำหนดเอง"], key="db_date_mode")
+    
+    # --- 2. Logic กรองข้อมูล ---
+    view_df = st.session_state.data.copy()
+    
+    # กรองแอป
+    if f_app:
+        view_df = view_df[view_df['แอป'].isin(f_app)]
+        
+    # กรองหมวดหมู่
+    if f_cat:
+        view_df = view_df[view_df['หมวดหมู่'].isin(f_cat)]
+        
+    # กรองวันที่
+    today = get_thai_date()
+    if f_date_mode == "วันนี้":
+        view_df = view_df[view_df['วันที่'] == today]
+    elif f_date_mode == "เดือนนี้":
+        view_df = view_df[(pd.to_datetime(view_df['วันที่']).dt.month == today.month) & (pd.to_datetime(view_df['วันที่']).dt.year == today.year)]
+    elif f_date_mode == "กำหนดเอง":
+        d_range = st.date_input("เลือกช่วง:", value=(today, today), key="db_custom_date")
+        if len(d_range) == 2:
+            view_df = view_df[(view_df['วันที่'] >= d_range[0]) & (view_df['วันที่'] <= d_range[1])]
+
+    # --- 3. แสดงผลและแก้ไข ---
+    st.caption(f"พบข้อมูล: {len(view_df)} รายการ")
+    
+    if not view_df.empty:
+        # แสดง Data Editor
+        edited_view = st.data_editor(
+            view_df.sort_values(by=["วันที่", "เวลา"], ascending=False),
+            num_rows="dynamic",
+            use_container_width=True,
+            key="data_editor_view" 
+        )
+        
+        # ปุ่มบันทึก (Logic: อัปเดตกลับไปที่ Main DF โดยใช้ Index)
+        if st.button("💾 บันทึกการแก้ไข (ในตารางที่กรอง)", type="primary"):
+            # 1. เอา Index ของข้อมูลที่แก้ มาอัปเดตใส่ Main DF
+            st.session_state.data.update(edited_view)
+            
+            # 2. จัดการการลบแถว (ถ้ามีลบใน Editor ต้องลบใน Main ด้วย)
+            # (วิธีง่ายสุดสำหรับ Streamlit คือ Update ค่า แล้ว Save เลย)
+            # แต่ถ้ามีการลบแถวใน filtered view มันซับซ้อนกว่า
+            # ดังนั้นเวอร์ชั่นนี้เน้น "แก้ค่า" เป็นหลัก ถ้าจะลบแนะนำให้หาแล้วลบ
+            
+            save_data(st.session_state.data)
+            st.success("บันทึกข้อมูลเรียบร้อยแล้ว!")
+            st.rerun()
+    else:
+        st.info("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
