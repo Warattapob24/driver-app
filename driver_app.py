@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 import datetime
 import plotly.express as px
+import json
+import os
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="ระบบบันทึกรายได้คนขับ", page_icon="🚗", layout="wide")
 DATA_FILE = "driver_data.csv"
+SETTINGS_FILE = "settings.json"
 
 # --- TIMEZONE ---
 def get_thai_time():
@@ -15,7 +18,23 @@ def get_thai_time():
 def get_thai_date():
     return get_thai_time().date()
 
-# --- 2. DATA LOADING ---
+# --- 2. SETTINGS MANAGEMENT (ระบบจำค่าการตั้งค่า) ---
+def load_settings():
+    # ค่าเริ่มต้นถ้ายังไม่มีไฟล์
+    default_settings = {"maxim_rate": 15, "ev_rate": 40.0}
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return default_settings
+    return default_settings
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f)
+
+# --- 3. DATA LOADING ---
 def load_and_clean_data():
     try:
         df = pd.read_csv(DATA_FILE)
@@ -29,7 +48,6 @@ def load_and_clean_data():
         }
         df.rename(columns=col_map, inplace=True)
         
-        # Ensure numeric
         num_cols = ['ยอดเต็ม/หน้าแอป', 'หัก/จ่าย', 'ทิป', 'คงเหลือ/สุทธิ', 'ระยะทาง(กม.)', 'เลขไมล์']
         for col in num_cols:
             if col not in df.columns: df[col] = 0.0
@@ -53,12 +71,28 @@ if 'data' not in st.session_state:
     st.session_state.data = load_and_clean_data()
     save_data(st.session_state.data)
 
-# --- 3. SIDEBAR ---
+# --- 4. SIDEBAR (ปรับปรุงให้จำค่าได้) ---
 with st.sidebar:
     st.title("⚙️ ตั้งค่า")
     st.caption(f"เวลา: {get_thai_time().strftime('%H:%M')}")
-    maxim_comm_rate = st.slider("Maxim หักคอม (%)", 0, 30, 15) / 100
-    ev_home_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=40, step=5)
+    
+    # โหลดค่าเดิมมาแสดง
+    current_settings = load_settings()
+    
+    # Widget ปรับค่า
+    new_maxim_rate = st.slider("Maxim หักคอม (%)", 0, 30, current_settings.get("maxim_rate", 15))
+    new_ev_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=float(current_settings.get("ev_rate", 40.0)), step=5.0)
+    
+    # ตรวจสอบว่ามีการเปลี่ยนแปลงไหม? ถ้ามีให้บันทึกทันที
+    if new_maxim_rate != current_settings.get("maxim_rate") or new_ev_rate != current_settings.get("ev_rate"):
+        updated_settings = {"maxim_rate": new_maxim_rate, "ev_rate": new_ev_rate}
+        save_settings(updated_settings)
+        # ไม่ต้อง rerun ก็ได้ เพราะค่าเปลี่ยนแล้ว แต่เพื่อให้แน่ใจว่าหน้าอื่นใช้ค่าใหม่
+        st.toast("บันทึกการตั้งค่าแล้ว!")
+    
+    # ตัวแปรสำหรับนำไปคำนวณในหน้าหลัก
+    maxim_comm_rate = new_maxim_rate / 100
+    ev_home_rate = new_ev_rate
     
     st.divider()
     if st.button("⚠️ ล้างข้อมูล", type="primary"):
@@ -70,12 +104,12 @@ with st.sidebar:
         save_data(st.session_state.data)
         st.rerun()
 
-# --- 4. MAIN APP ---
+# --- 5. MAIN APP ---
 st.title("🚗 ระบบบันทึกรายได้")
 tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล"])
 
 # ==========================================
-# TAB 1: บันทึกงาน (แก้ไขตามที่คุณต้องการ)
+# TAB 1: บันทึกงาน
 # ==========================================
 with tab1:
     col_type, col_form = st.columns([1, 2])
@@ -93,36 +127,29 @@ with tab1:
             st.markdown("#### 📝 บันทึกรายได้")
             with st.form(key="form_income", clear_on_submit=True):
                 platform = st.selectbox("เลือกแอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"])
-                
                 c1, c2 = st.columns(2)
-                # ใช้ value=None และ placeholder เพื่อให้ช่องเป็นสีเทาจางๆ และพิมพ์ได้เลย
                 with c1: 
                     app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
                 with c2: 
-                    # เปลี่ยนกลับเป็น "รวมทิป" แบบเดิมที่คุณเข้าใจ
                     real_receive = st.number_input("เงินรับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
                 
                 note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
                 submitted = st.form_submit_button("บันทึกรายได้ ✅", type="primary", use_container_width=True)
                 
                 if submitted:
-                    # แปลงค่าว่างให้เป็น 0 เพื่อคำนวณ
                     price_val = app_price if app_price is not None else 0.0
                     real_val = real_receive if real_receive is not None else 0.0
                     
                     if price_val > 0 or real_val > 0:
-                        # ถ้าไม่กรอกเงินรับจริง ให้ถือว่าเท่ากับหน้าแอป
                         if real_val == 0: real_val = price_val 
                         
                         deduction = 0
                         tip = max(0, real_val - price_val)
                         
-                        # --- แก้ไขตรงนี้ครับ: หัก % เฉพาะ Maxim เท่านั้น ---
                         if platform == "Maxim":
                             deduction = price_val * maxim_comm_rate
                             net_income = price_val - deduction + tip
                         else:
-                            # งานนอก, Grab, Bolt ฯลฯ ไม่หัก % (รับเต็ม)
                             net_income = price_val + tip 
                         
                         new_row = {
@@ -143,6 +170,8 @@ with tab1:
             st.markdown("#### ⚡ ต้นทุนพลังงาน")
             with st.form(key="form_energy", clear_on_submit=True):
                 e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
+                
+                # ใช้ค่าที่โหลดมาจาก Settings
                 default_val = None
                 if e_type == "⚡ ชาร์จบ้าน (เหมา)": default_val = float(ev_home_rate)
                 
@@ -222,7 +251,7 @@ with tab1:
     st.markdown("<br>" * 10, unsafe_allow_html=True)
 
 # ==========================================
-# TAB 2: สรุปผล (คงไว้แบบที่คุณชอบ: ประวัติละเอียด)
+# TAB 2: สรุปผล
 # ==========================================
 with tab2:
     st.markdown("### 📊 แดชบอร์ดสรุปผลละเอียด")
