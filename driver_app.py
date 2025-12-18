@@ -152,6 +152,8 @@ with tab1:
                 submitted = st.form_submit_button("บันทึกรายได้ ✅", type="primary", use_container_width=True)
                 
                 if submitted:
+                    if app_price is None: app_price = 0.0
+                    if real_receive is None: real_receive = 0.0
                     if app_price > 0 or real_receive > 0:
                         # ถ้าไม่กรอกเงินรับจริง ให้เท่ากับหน้าแอป
                         if real_receive == 0: real_receive = app_price
@@ -313,4 +315,5 @@ with tab3:
             st.session_state.data = edited
             save_data(edited)
             st.success("บันทึกแล้ว")
+
 
