@@ -144,8 +144,8 @@ with tab1:
                 platform = st.selectbox("เลือกแอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"])
                 
                 c1, c2 = st.columns(2)
-                with c1: app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0)
-                with c2: real_receive = st.number_input("เงินรับจริง (รวมทิป)", min_value=0.0, step=10.0)
+                with c1: app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
+                with c2: real_receive = st.number_input("เงินรับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="0.00")
                 
                 note = st.text_input("หมายเหตุ")
                 
@@ -313,3 +313,4 @@ with tab3:
             st.session_state.data = edited
             save_data(edited)
             st.success("บันทึกแล้ว")
+
