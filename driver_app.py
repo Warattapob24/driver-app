@@ -121,7 +121,6 @@ with tab1:
                 with c1: 
                     app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
                 with c2: 
-                    # ปรับข้อความให้ชัดเจนตามที่คุณต้องการ
                     real_receive = st.number_input("เงินที่รับจริงจากลูกค้า (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
                 
                 note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
@@ -386,4 +385,3 @@ with tab3:
             st.rerun()
     else:
         st.info("ไม่พบข้อมูลตามเงื่อนไข")
-        
