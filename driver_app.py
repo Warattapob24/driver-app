@@ -242,67 +242,77 @@ with tab1:
                         st.warning("กรุณากรอกจำนวนเงิน")
 
 # ==========================================
-# TAB 2: สรุปผล (เติมกราฟและเวลางานที่หายไปกลับคืนมาให้)
+# TAB 2: DASHBOARD PRO (ปรับโฉมใหม่)
 # ==========================================
 with tab2:
-    st.markdown("### 📊 แดชบอร์ดสรุปผลละเอียด")
+    st.markdown("### 🚀 Dashboard วิเคราะห์รายได้")
     
-    # 1. ตัวเลือกช่วงเวลา (เหมือนเดิม)
-    time_filter = st.selectbox(
-        "📅 เลือกช่วงเวลา:",
-        ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง (เลือกวันที่)"]
-    )
-    
-    custom_start_date = None
-    custom_end_date = None
-    if time_filter == "กำหนดเอง (เลือกวันที่)":
-        st.info("👇 เลือกช่วงวันที่จากปฏิทิน")
-        date_range = st.date_input("ระบุช่วงวันที่:", value=(get_thai_date(), get_thai_date()), max_value=get_thai_date())
-        if len(date_range) == 2: custom_start_date, custom_end_date = date_range
-    
+    # --- Filter Section (Design ใหม่) ---
+    with st.container(border=True):
+        c_filter, c_date = st.columns([1, 2])
+        with c_filter:
+            time_filter = st.selectbox(
+                "📅 เลือกช่วงเวลา:",
+                ["สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "ทั้งหมด", "กำหนดเอง"]
+            )
+        with c_date:
+            custom_start, custom_end = None, None
+            if time_filter == "กำหนดเอง":
+                dr = st.date_input("ระบุวันที่", value=(get_thai_date(), get_thai_date()))
+                if len(dr) == 2: custom_start, custom_end = dr
+            else:
+                st.info(f"กำลังแสดงข้อมูล: {time_filter}")
+
+    # --- Data Preparation ---
     df = st.session_state.data
     if not df.empty:
+        # Filter Logic
         today = get_thai_date()
-        filtered_df = df.copy()
+        filter_df = df.copy()
         
-        # --- กรองข้อมูลตามเวลา ---
-        if time_filter == "วันนี้": filtered_df = df[df['วันที่'] == today]
-        elif time_filter == "เมื่อวาน": filtered_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
-        elif time_filter == "สัปดาห์นี้":
+        if time_filter == "สัปดาห์นี้":
             start_week = today - datetime.timedelta(days=today.weekday())
-            filtered_df = df[(df['วันที่'] >= start_week) & (df['วันที่'] <= start_week + datetime.timedelta(days=6))]
-        elif time_filter == "เดือนนี้": filtered_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
+            filter_df = df[df['วันที่'] >= start_week]
+        elif time_filter == "เดือนนี้":
+            filter_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
         elif time_filter == "เดือนที่แล้ว":
             first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
-            filtered_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
-        elif time_filter == "ปีนี้": filtered_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
-        elif time_filter == "กำหนดเอง (เลือกวันที่)" and custom_start_date:
-            filtered_df = df[(df['วันที่'] >= custom_start_date) & (df['วันที่'] <= custom_end_date)]
-        elif time_filter == "กำหนดเอง (เลือกวันที่)": filtered_df = pd.DataFrame()
-
-        if not filtered_df.empty:
-            # คำนวณระยะทาง
-            odom_df = filtered_df[filtered_df['เลขไมล์'] > 0]
-            daily_dist = 0
-            if not odom_df.empty:
-                daily_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
-                daily_dist = (daily_odom['max'] - daily_odom['min']).sum()
-            total_km = daily_dist if daily_dist > 0 else filtered_df['ระยะทาง(กม.)'].sum()
-
-            # คำนวณเงิน
-            inc_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายรับ']
-            exp_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายจ่าย']
+            filter_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
+        elif time_filter == "ปีนี้":
+            filter_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
+        elif time_filter == "กำหนดเอง" and custom_start:
+            filter_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
+        
+        if filter_df.empty:
+            st.warning("ไม่มีข้อมูลในช่วงเวลานี้")
+        else:
+            # --- CALCULATIONS ---
+            # 1. Financials
+            income_df = filter_df[filter_df['หมวดหมู่'] == 'รายรับ']
+            expense_df = filter_df[filter_df['หมวดหมู่'] == 'รายจ่าย']
             
-            total_inc = inc_df['คงเหลือ/สุทธิ'].sum()
-            fuel = exp_df[exp_df['รายการ'] == 'ค่าน้ำมัน/ไฟ']['หัก/จ่าย'].sum()
-            other = exp_df[exp_df['รายการ'] == 'ทั่วไป']['หัก/จ่าย'].sum()
-            topup = exp_df[exp_df['รายการ'] == 'เติมเครดิต']['หัก/จ่าย'].sum()
-            total_exp = exp_df['หัก/จ่าย'].sum()
+            total_rev = income_df['คงเหลือ/สุทธิ'].sum()
+            total_exp = expense_df['หัก/จ่าย'].sum()
+            net_profit = total_rev - total_exp
             
-            net = total_inc - total_exp # กำไร = รายรับ - รายจ่ายทั้งหมด
+            # 2. Distance & Fuel
+            odom_rows = filter_df[filter_df['เลขไมล์'] > 0]
+            total_km = 0
+            if not odom_rows.empty:
+                 # Group by date to find daily range
+                daily_odom = odom_rows.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
+                total_km = (daily_odom['max'] - daily_odom['min']).sum()
+            
+            # Fallback if no odometer recorded but manual distance exists (optional logic)
+            if total_km == 0: total_km = filter_df['ระยะทาง(กม.)'].sum()
 
-            # คำนวณชั่วโมงงาน
-            shift_df = filtered_df[filtered_df['หมวดหมู่'] == 'กะงาน']
+            fuel_cost = expense_df[expense_df['รายการ'] == 'ค่าน้ำมัน/ไฟ']['หัก/จ่าย'].sum()
+            cost_per_km = fuel_cost / total_km if total_km > 0 else 0
+
+            # 3. Time (Approx)
+            # Simple logic: Count distinct days * avg hours per day (or exact calculation if possible)
+            # Using precise calculation from previous version
+            shift_df = filter_df[filter_df['หมวดหมู่'] == 'กะงาน']
             total_hours = 0
             if not shift_df.empty:
                 for d in shift_df['วันที่'].unique():
@@ -317,41 +327,93 @@ with tab2:
                             if h < 0: h += 24
                             total_hours += h
                         except: pass
-
-            # --- ส่วนแสดงผล Metrics ---
-            st.caption(f"สรุปยอด: {time_filter}")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("💰 กำไรสุทธิ (หักทุกอย่าง)", f"{net:,.0f}")
-            m2.metric("⛽ ค่าน้ำมัน/ไฟ", f"{fuel:,.0f}")
-            m3.metric("🛣️ วิ่ง(กม.)", f"{total_km:,.0f}")
-            m4.metric("⏱️ เวลางาน", f"{total_hours:.1f} ชม.")
             
-            st.divider()
-            s1, s2 = st.columns(2)
-            if total_km > 0: s1.metric("📊 รายได้/กม.", f"{total_inc/total_km:.1f} บ.")
-            if total_hours > 0: s2.metric("💵 รายได้/ชม.", f"{total_inc/total_hours:.0f} บ.")
+            hourly_rate = total_rev / total_hours if total_hours > 0 else 0
 
-            # --- ส่วนแสดงกราฟ (ที่เคยหายไป เอามาคืนให้แล้ว) ---
-            st.divider()
-            c1, c2 = st.columns(2)
-            with c1:
-                # กราฟรายได้แยกตามแอป
-                if not inc_df.empty:
-                    st.plotly_chart(px.bar(inc_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index(), x='แอป', y='คงเหลือ/สุทธิ', color='แอป', text_auto=True, title="รายได้แยกตามแอป"), use_container_width=True)
-            with c2:
-                # กราฟช่วงเวลาทำเงิน
-                if not inc_df.empty:
-                    inc_df['Hour'] = pd.to_datetime(inc_df['เวลา'], format='%H:%M').dt.hour
-                    st.plotly_chart(px.histogram(inc_df, x='Hour', y='คงเหลือ/สุทธิ', nbins=24, title="🔥 ช่วงเวลาทำเงิน", color_discrete_sequence=['#FF4B4B']), use_container_width=True)
+            # --- TOP METRICS (KPIs) ---
+            st.markdown("#### 🏆 ภาพรวมผลประกอบการ")
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
             
-            # กราฟวงกลมรายจ่าย
-            if not exp_df.empty:
-                st.plotly_chart(px.pie(exp_df, values='หัก/จ่าย', names='รายการ', title="💸 สัดส่วนค่าใช้จ่าย", hole=0.4), use_container_width=True)
+            with kpi1:
+                st.metric("💰 กำไรสุทธิ", f"{net_profit:,.0f} บ.", delta=f"รายรับ {total_rev:,.0f}")
+            with kpi2:
+                st.metric("💸 ค่าใช้จ่ายรวม", f"{total_exp:,.0f} บ.", delta=f"-{fuel_cost:,.0f} (เชื้อเพลิง)", delta_color="inverse")
+            with kpi3:
+                st.metric("🛣️ ต้นทุนต่อ กม.", f"{cost_per_km:.2f} บ./กม.", help="คำนวณจาก ค่าน้ำมันหารด้วยระยะทางรวม")
+            with kpi4:
+                st.metric("⏱️ รายได้ต่อ ชม.", f"{hourly_rate:.0f} บ./ชม.", help="รายรับหารด้วยชั่วโมงทำงานรวม")
 
-        else:
-            st.warning(f"ไม่พบข้อมูลในช่วง: {time_filter}")
+            st.divider()
+
+            # --- ROW 1: TREND & COMPOSITION ---
+            r1c1, r1c2 = st.columns([2, 1])
+            with r1c1:
+                st.subheader("📈 แนวโน้มรายได้ (Daily Trend)")
+                if not income_df.empty:
+                    daily_inc = income_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
+                    daily_exp = expense_df.groupby('วันที่')['หัก/จ่าย'].sum().reset_index()
+                    
+                    # Merge for chart
+                    daily_chart = pd.merge(daily_inc, daily_exp, on='วันที่', how='outer').fillna(0)
+                    daily_chart.columns = ['Date', 'Income', 'Expense']
+                    daily_chart['Profit'] = daily_chart['Income'] - daily_chart['Expense']
+                    
+                    # Area Chart showing Net Profit vs Expense
+                    fig_trend = px.bar(
+                        daily_chart, x='Date', y=['Profit', 'Expense'], 
+                        title="รายได้สุทธิ vs ค่าใช้จ่าย (รายวัน)",
+                        color_discrete_map={'Profit': '#00CC96', 'Expense': '#EF553B'},
+                        labels={'value': 'บาท', 'variable': 'ประเภท'}
+                    )
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                else:
+                    st.info("ยังไม่มีข้อมูลรายรับรายวัน")
+
+            with r1c2:
+                st.subheader("🍰 ส่วนแบ่งแอป (Top Apps)")
+                if not income_df.empty:
+                    app_sum = income_df.groupby('แอป')['คงเหลือ/สุทธิ'].sum().reset_index()
+                    fig_pie = px.donut(
+                        app_sum, values='คงเหลือ/สุทธิ', names='แอป', 
+                        hole=0.4, color_discrete_sequence=px.colors.qualitative.Prism
+                    )
+                    fig_pie.update_layout(showlegend=False)
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.caption("ไม่มีข้อมูล")
+
+            # --- ROW 2: STRATEGY (HEATMAP) ---
+            st.subheader("🔥 Strategic Heatmap: ขับช่วงไหนดีที่สุด?")
+            if not income_df.empty:
+                # Prepare Heatmap Data
+                hm_df = income_df.copy()
+                hm_df['Day'] = pd.to_datetime(hm_df['วันที่']).dt.day_name()
+                hm_df['Hour'] = pd.to_datetime(hm_df['เวลา'], format='%H:%M').dt.hour
+                
+                # Map English days to Thai for display
+                day_map = {
+                    'Monday': '1.จันทร์', 'Tuesday': '2.อังคาร', 'Wednesday': '3.พุธ',
+                    'Thursday': '4.พฤหัส', 'Friday': '5.ศุกร์', 'Saturday': '6.เสาร์', 'Sunday': '7.อาทิตย์'
+                }
+                hm_df['DayThai'] = hm_df['Day'].map(day_map)
+                
+                # Pivot Table
+                pivot_hm = hm_df.pivot_table(index='DayThai', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum').fillna(0)
+                
+                # Heatmap Chart
+                fig_hm = px.imshow(
+                    pivot_hm, 
+                    labels=dict(x="ชั่วโมง", y="วัน", color="รายได้"),
+                    x=pivot_hm.columns, y=pivot_hm.index,
+                    color_continuous_scale='RdBu_r', aspect="auto"
+                )
+                st.plotly_chart(fig_hm, use_container_width=True)
+                st.caption("💡 **สีน้ำเงินเข้ม** = ช่วงเวลาที่ทำเงินได้สูงสุด | **สีแดง** = รายได้น้อย")
+            else:
+                st.info("ต้องการข้อมูลรายรับมากกว่านี้เพื่อสร้าง Heatmap")
+
     else:
-        st.info("ยังไม่มีข้อมูลในระบบ")
+        st.info("📝 ยังไม่มีข้อมูลในระบบ กรุณาบันทึกงานแรกที่ Tab 1")
 
 # ==========================================
 # TAB 3: ฐานข้อมูล (เพิ่มตัวกรองกลับมาให้ตามที่เคยขอ)
@@ -385,3 +447,4 @@ with tab3:
             st.rerun()
     else:
         st.info("ไม่พบข้อมูลตามเงื่อนไข")
+
