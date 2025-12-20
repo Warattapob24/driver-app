@@ -31,27 +31,23 @@ def load_settings():
 def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f: json.dump(settings, f)
 
-# --- 3. DATA LOADING (แก้ไขให้ต่อ Google Sheets) ---
+# แก้ไขฟังก์ชัน load_and_clean_data
 def load_and_clean_data():
-    # สร้าง Connection ไปที่ Google Sheets
     conn = st.connection("gsheets", type=GSheetsConnection)
-    
     try:
-        # อ่านข้อมูล (ttl=0 คือโหลดใหม่ทุกครั้ง ไม่จำค่าเก่า)
-        df = conn.read(worksheet="Sheet1", ttl=0)
+        # ✅ แก้ตรงนี้: เปลี่ยนจาก "Sheet1" เป็น "Drivers" ตามที่คุณตั้งค่าไว้
+        df = conn.read(worksheet="Drivers", ttl=0)
         
-        # ถ้าโหลดมาแล้วคอลัมน์ไม่ครบ หรือเป็นไฟล์ใหม่ ให้ตั้งค่าเริ่มต้น
         required_cols = [
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
             'ยอดเต็ม/หน้าแอป', 'หัก/จ่าย', 'ทิป', 'คงเหลือ/สุทธิ', 
             'เงินสดเข้าตัว', 'เลขไมล์', 'หมายเหตุ'
         ]
         
-        # ตรวจสอบและสร้าง DataFrame
         if df.empty or len(df.columns) < len(required_cols):
              df = pd.DataFrame(columns=required_cols)
         
-        # --- CLEANING DATA (Logic เดิมของคุณ) ---
+        # ... (ส่วน Clean Data ข้างล่างเหมือนเดิมทุกประการ) ...
         col_map = {
             'Date': 'วันที่', 'Time': 'เวลา', 'Platform': 'แอป',
             'Category': 'หมวดหมู่', 'SubCategory': 'รายการ',
@@ -62,7 +58,6 @@ def load_and_clean_data():
             'Payment_Method': 'ช่องทางรับเงิน',
             'Cash_In': 'เงินสดเข้าตัว'
         }
-        # Rename เฉพาะคอลัมน์ที่มีอยู่จริง
         df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
         
         if 'ช่องทางรับเงิน' not in df.columns: df['ช่องทางรับเงิน'] = 'ไม่ระบุ'
@@ -80,22 +75,22 @@ def load_and_clean_data():
         
     except Exception as e:
         st.error(f"เชื่อมต่อ Google Sheets ไม่ได้: {e}")
-        # กรณีฉุกเฉิน คืนค่า DataFrame เปล่า
         return pd.DataFrame(columns=[
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
             'ยอดเต็ม/หน้าแอป', 'หัก/จ่าย', 'ทิป', 'คงเหลือ/สุทธิ', 
             'เงินสดเข้าตัว', 'เลขไมล์', 'หมายเหตุ'
         ])
 
+# แก้ไขฟังก์ชัน save_data
 def save_data(df):
-    # ฟังก์ชันบันทึกลง Google Sheets
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        # แปลงวันที่เป็น String ก่อนส่งขึ้น Sheets ป้องกัน Error
         df_save = df.copy()
         if 'วันที่' in df_save.columns:
             df_save['วันที่'] = df_save['วันที่'].astype(str)
-        conn.update(worksheet="Sheet1", data=df_save)
+            
+        # ✅ แก้ตรงนี้: เปลี่ยนจาก "Sheet1" เป็น "Drivers"
+        conn.update(worksheet="Drivers", data=df_save)
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
@@ -556,3 +551,4 @@ with tab3:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
     else:
         st.info("ไม่พบข้อมูลตามเงื่อนไข")
+
