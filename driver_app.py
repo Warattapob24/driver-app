@@ -298,7 +298,7 @@ with tab1:
     st.markdown("<br>" * 5, unsafe_allow_html=True)
 
 # ==========================================
-# TAB 2: สรุปผล (Upgrade: เพิ่มความคุ้มค่า + เป้าหมาย)
+# TAB 2: สรุปผล (Upgrade: แก้ไขเป้าหมายให้ปรับตามช่วงเวลา)
 # ==========================================
 with tab2:
     st.markdown("### 📊 แดชบอร์ดวิเคราะห์ผลงาน")
@@ -318,19 +318,35 @@ with tab2:
         today = get_thai_date()
         f_df = df.copy()
         
-        # Filter Logic
-        if time_filter == "วันนี้": f_df = df[df['วันที่'] == today]
-        elif time_filter == "เมื่อวาน": f_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
+        # ตัวแปรสำหรับคำนวณเป้าหมาย (Days Multiplier)
+        days_count = 1 
+        
+        # Filter Logic & Days Calculation
+        if time_filter == "วันนี้": 
+            f_df = df[df['วันที่'] == today]
+            days_count = 1
+        elif time_filter == "เมื่อวาน": 
+            f_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
+            days_count = 1
         elif time_filter == "สัปดาห์นี้":
             start = today - datetime.timedelta(days=today.weekday())
             f_df = df[(df['วันที่'] >= start) & (df['วันที่'] <= start + datetime.timedelta(days=6))]
-        elif time_filter == "เดือนนี้": f_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
+            days_count = 7
+        elif time_filter == "เดือนนี้": 
+            f_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
+            # คำนวณจำนวนวันในเดือนปัจจุบัน
+            import calendar
+            days_count = calendar.monthrange(today.year, today.month)[1]
         elif time_filter == "เดือนที่แล้ว":
             first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
             f_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
-        elif time_filter == "ปีนี้": f_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
-        elif time_filter == "กำหนดเอง" and custom_start:
+            days_count = calendar.monthrange(start_prev.year, start_prev.month)[1]
+        elif time_filter == "ปีนี้": 
+            f_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
+            days_count = 365 # คร่าวๆ
+        elif time_filter == "กำหนดเอง" and custom_start and custom_end:
             f_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
+            days_count = (custom_end - custom_start).days + 1
 
         if not f_df.empty:
             # --- คำนวณตัวเลข ---
@@ -342,14 +358,14 @@ with tab2:
             net = total_inc - total_exp
             cash = f_df['เงินสดเข้าตัว'].sum()
             
-            # คำนวณระยะทาง (Distance)
+            # คำนวณระยะทาง
             odom_df = f_df[f_df['เลขไมล์'] > 0]
             dist = 0
             if not odom_df.empty:
                 d_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
                 dist = (d_odom['max'] - d_odom['min']).sum()
             
-            # คำนวณชั่วโมง (Hours)
+            # คำนวณชั่วโมง
             hours = 0
             shift_df = f_df[f_df['หมวดหมู่'] == 'กะงาน']
             if not shift_df.empty:
@@ -366,16 +382,20 @@ with tab2:
                             hours += h
                         except: pass
             
-            # --- 🎯 ส่วนเป้าหมาย (เฉพาะดูรายวัน/เดือน) ---
-            if time_filter in ["วันนี้", "เดือนนี้"]:
-                st.markdown(f"**🎯 เป้าหมาย ({time_filter}): {total_inc:,.0f} / {target_income:,.0f} บาท**")
-                progress = min(total_inc / target_income, 1.0) if target_income > 0 else 0
-                st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}%")
+            # --- 🎯 ส่วนเป้าหมาย (ปรับสูตรแล้ว) ---
+            # คำนวณเป้าหมายรวมตามช่วงเวลา
+            total_target = target_income * days_count
+            
+            # แสดงผลแบบ Progress Bar
+            st.markdown(f"**🎯 เป้าหมาย ({time_filter}): {total_inc:,.0f} / {total_target:,.0f} บาท**")
+            
+            # คำนวณ % (กัน error หารด้วย 0)
+            progress = min(total_inc / total_target, 1.0) if total_target > 0 else 0
+            st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}% ({total_inc:,.0f} บาท)")
 
-            # --- 📈 ส่วนแสดงผล Metrics แบบใหม่ ---
+            # --- 📈 ส่วนแสดงผล Metrics ---
             st.markdown("#### 💎 ประสิทธิภาพการขับ")
             
-            # คำนวณประสิทธิภาพ
             baht_per_km = net / dist if dist > 0 else 0
             baht_per_hr = net / hours if hours > 0 else 0
             
@@ -385,7 +405,6 @@ with tab2:
             m3.metric("⚡ บาท / กม.", f"{baht_per_km:.2f} บ.", delta_color="normal", help="ควรมากกว่า 5-10 บาท")
             m4.metric("⏱️ บาท / ชม.", f"{baht_per_hr:.0f} บ.", help="ค่าแรงต่อชั่วโมง")
 
-            # แถว 2: รายละเอียดการเงิน
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("💵 เงินสดเข้าตัว", f"{cash:,.0f} บ.")
             c2.metric("💸 รายจ่ายรวม", f"{total_exp:,.0f} บ.")
@@ -403,26 +422,23 @@ with tab2:
                     daily = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
                     st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 เส้นทางรายได้ (Net Income)", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
             with col_g2:
-                # กราฟโดนัท (ปรับปรุงให้แสดงยอดเงินด้วย)
                 if not inc_df.empty:
-                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนรายได้แต่ละแอป", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
+                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนรายได้", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
                     fig.update_traces(textposition='inside', textinfo='percent+label')
                     fig.update_layout(showlegend=False, margin=dict(t=30, b=0, l=0, r=0))
                     st.plotly_chart(fig, use_container_width=True)
 
             col_g3, col_g4 = st.columns(2)
             with col_g3:
-                # Heatmap ช่วงเวลา
                 if not inc_df.empty:
                     temp = inc_df.copy()
                     temp['Hour'] = pd.to_datetime(temp['เวลา'], format='%H:%M').dt.hour
                     hm = temp.pivot_table(index='แอป', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum', fill_value=0)
                     if not hm.empty:
-                        fig_hm = px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน (Hour Map)", aspect="auto", color_continuous_scale="Greens", labels=dict(x="เวลา (น.)", y="แอป", color="บาท"))
+                        fig_hm = px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens", labels=dict(x="เวลา (น.)", y="แอป", color="บาท"))
                         st.plotly_chart(fig_hm, use_container_width=True)
             
             with col_g4:
-                # กราฟแท่งรายจ่าย (แยกประเภท)
                 if not exp_df.empty:
                     exp_sum = exp_df.groupby('รายการ')['หัก/จ่าย'].sum().reset_index()
                     fig_exp = px.bar(exp_sum, x='รายการ', y='หัก/จ่าย', title="💸 รายจ่ายแยกตามประเภท", color='รายการ', text_auto=True)
@@ -486,5 +502,6 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
