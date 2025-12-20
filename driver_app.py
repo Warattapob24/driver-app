@@ -298,21 +298,26 @@ with tab1:
     st.markdown("<br>" * 5, unsafe_allow_html=True)
 
 # ==========================================
-# TAB 2: สรุปผล (แก้ไข Bug: ย้าย import calendar ให้ถูกต้อง)
+# TAB 2: สรุปผล (Final: แก้กราฟหาย + แสดงข้อความเมื่อไม่มีข้อมูล)
 # ==========================================
-import calendar  # 🟢 เพิ่มบรรทัดนี้เพื่อเรียกใช้ปฏิทิน
+import calendar
+import plotly.express as px  # 🟢 import ตรงนี้เพื่อความชัวร์
 
 with tab2:
     st.markdown("### 📊 แดชบอร์ดวิเคราะห์ผลงาน")
     
-    # 1. ตัวเลือกช่วงเวลา
+    # 1. ตัวเลือกช่วงเวลา (ใส่ key กัน error ซ้ำ)
     c_filter, c_blank = st.columns([2, 3])
     with c_filter:
-        time_filter = st.selectbox("📅 เลือกช่วงเวลา:", ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"])
+        time_filter = st.selectbox("📅 เลือกช่วงเวลา:", 
+                                 ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"],
+                                 key="tab2_time_filter_final")
     
     custom_start, custom_end = None, None
     if time_filter == "กำหนดเอง":
-        dr = st.date_input("ช่วงวันที่:", value=(get_thai_date(), get_thai_date()))
+        dr = st.date_input("ช่วงวันที่:", 
+                         value=(get_thai_date(), get_thai_date()),
+                         key="tab2_date_picker_final")
         if len(dr) == 2: custom_start, custom_end = dr
     
     df = st.session_state.data
@@ -323,7 +328,7 @@ with tab2:
         # ตัวแปรสำหรับคำนวณเป้าหมาย (Days Multiplier)
         days_count = 1 
         
-        # Filter Logic & Days Calculation
+        # Filter Logic
         if time_filter == "วันนี้": 
             f_df = df[df['วันที่'] == today]
             days_count = 1
@@ -336,12 +341,10 @@ with tab2:
             days_count = 7
         elif time_filter == "เดือนนี้": 
             f_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
-            # 🟢 คำนวณวันในเดือนนี้ (ใช้ calendar ได้แล้ว)
             days_count = calendar.monthrange(today.year, today.month)[1]
         elif time_filter == "เดือนที่แล้ว":
             first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
             f_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
-            # 🟢 คำนวณวันในเดือนที่แล้ว
             days_count = calendar.monthrange(start_prev.year, start_prev.month)[1]
         elif time_filter == "ปีนี้": 
             f_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
@@ -360,14 +363,13 @@ with tab2:
             net = total_inc - total_exp
             cash = f_df['เงินสดเข้าตัว'].sum()
             
-            # คำนวณระยะทาง
+            # คำนวณระยะทาง & ชั่วโมง
             odom_df = f_df[f_df['เลขไมล์'] > 0]
             dist = 0
             if not odom_df.empty:
                 d_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
                 dist = (d_odom['max'] - d_odom['min']).sum()
             
-            # คำนวณชั่วโมง
             hours = 0
             shift_df = f_df[f_df['หมวดหมู่'] == 'กะงาน']
             if not shift_df.empty:
@@ -385,23 +387,23 @@ with tab2:
                         except: pass
             
             # --- 🎯 ส่วนเป้าหมาย ---
+            if 'target_income' not in locals(): target_income = 2000
             total_target = target_income * days_count
             
             st.markdown(f"**🎯 เป้าหมาย ({time_filter}): {total_inc:,.0f} / {total_target:,.0f} บาท**")
             progress = min(total_inc / total_target, 1.0) if total_target > 0 else 0
-            st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}% ({total_inc:,.0f} บาท)")
+            st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}%")
 
-            # --- 📈 ส่วนแสดงผล Metrics ---
+            # --- 📈 Metrics ---
             st.markdown("#### 💎 ประสิทธิภาพการขับ")
-            
             baht_per_km = net / dist if dist > 0 else 0
             baht_per_hr = net / hours if hours > 0 else 0
             
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("💰 กำไรสุทธิ", f"{net:,.0f} บ.", help="รายรับ - รายจ่าย")
+            m1.metric("💰 กำไรสุทธิ", f"{net:,.0f} บ.")
             m2.metric("🛣️ ระยะทาง", f"{dist:,.0f} กม.")
-            m3.metric("⚡ บาท / กม.", f"{baht_per_km:.2f} บ.", delta_color="normal", help="ควรมากกว่า 5-10 บาท")
-            m4.metric("⏱️ บาท / ชม.", f"{baht_per_hr:.0f} บ.", help="ค่าแรงต่อชั่วโมง")
+            m3.metric("⚡ บาท / กม.", f"{baht_per_km:.2f} บ.")
+            m4.metric("⏱️ บาท / ชม.", f"{baht_per_hr:.0f} บ.")
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("💵 เงินสดเข้าตัว", f"{cash:,.0f} บ.")
@@ -411,21 +413,27 @@ with tab2:
             
             st.divider()
 
-            # --- 📊 กราฟ ---
+            # --- 📊 ส่วนแสดงกราฟ (ปรับปรุงใหม่) ---
             APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
 
+            # แถวที่ 1: กราฟเส้น และ โดนัท
             col_g1, col_g2 = st.columns([2, 1])
             with col_g1:
                 if not inc_df.empty:
                     daily = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
-                    st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 เส้นทางรายได้ (Net Income)", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
+                    st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 เส้นทางรายได้", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
+                else:
+                    st.container(border=True).info("📭 ยังไม่มีข้อมูลรายได้ในช่วงนี้")
+
             with col_g2:
                 if not inc_df.empty:
-                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนรายได้", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
-                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนแอป", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
                     fig.update_layout(showlegend=False, margin=dict(t=30, b=0, l=0, r=0))
                     st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.container(border=True).info("รอข้อมูล...")
 
+            # แถวที่ 2: Heatmap และ รายจ่าย
             col_g3, col_g4 = st.columns(2)
             with col_g3:
                 if not inc_df.empty:
@@ -433,20 +441,22 @@ with tab2:
                     temp['Hour'] = pd.to_datetime(temp['เวลา'], format='%H:%M').dt.hour
                     hm = temp.pivot_table(index='แอป', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum', fill_value=0)
                     if not hm.empty:
-                        fig_hm = px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens", labels=dict(x="เวลา (น.)", y="แอป", color="บาท"))
+                        fig_hm = px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens")
                         st.plotly_chart(fig_hm, use_container_width=True)
+                else:
+                    st.container(border=True).info("ยังไม่มีข้อมูลช่วงเวลา")
             
             with col_g4:
                 if not exp_df.empty:
                     exp_sum = exp_df.groupby('รายการ')['หัก/จ่าย'].sum().reset_index()
-                    fig_exp = px.bar(exp_sum, x='รายการ', y='หัก/จ่าย', title="💸 รายจ่ายแยกตามประเภท", color='รายการ', text_auto=True)
+                    fig_exp = px.bar(exp_sum, x='รายการ', y='หัก/จ่าย', title="💸 รายจ่ายแยกประเภท", color='รายการ', text_auto=True)
                     st.plotly_chart(fig_exp, use_container_width=True)
                 else:
-                    st.info("ไม่มีรายจ่ายในช่วงนี้")
+                    st.container(border=True).info("👍 เยี่ยมมาก! ยังไม่มีรายจ่าย")
 
-        else: st.warning("ไม่พบข้อมูลในช่วงเวลานี้")
-    else: st.info("ยังไม่มีข้อมูลในระบบ")
-                        
+        else: st.warning("🔍 ไม่พบข้อมูลการทำงานในช่วงเวลานี้")
+    else: st.info("📝 เริ่มต้นใช้งานโดยการบันทึกงานแรกของคุณ")
+        
 # ==========================================
 # TAB 3: ฐานข้อมูล (ปรับปรุง Logic การแก้ข้อมูล)
 # ==========================================
@@ -500,6 +510,7 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
 
