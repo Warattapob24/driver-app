@@ -4,12 +4,11 @@ import datetime
 import plotly.express as px
 import json
 import os
-from streamlit_gsheets import GSheetsConnection # เพิ่มตัวเชื่อมต่อ Google Sheets
+from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="ระบบบันทึกรายได้คนขับ", page_icon="🚗", layout="wide")
 SETTINGS_FILE = "settings.json"
-# DATA_FILE ไม่ต้องใช้แล้ว เพราะจะไปลง Google Sheets แทน
 
 # --- TIMEZONE ---
 def get_thai_time():
@@ -19,7 +18,7 @@ def get_thai_time():
 def get_thai_date():
     return get_thai_time().date()
 
-# --- 2. SETTINGS (เหมือนเดิม) ---
+# --- 2. SETTINGS ---
 def load_settings():
     default_settings = {"ev_rate": 40.0}
     if os.path.exists(SETTINGS_FILE):
@@ -31,12 +30,13 @@ def load_settings():
 def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f: json.dump(settings, f)
 
-# แก้ไขฟังก์ชัน load_and_clean_data
+# --- 3. DATA LOADING (แก้ไขจุดสำคัญ) ---
 def load_and_clean_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        # ✅ แก้ตรงนี้: เปลี่ยนจาก "Sheet1" เป็น "Drivers" ตามที่คุณตั้งค่าไว้
-        df = conn.read(worksheet="Drivers", ttl=0)
+        # 🟢 แก้จุดที่ 1: ลบ worksheet="Drivers" ออก
+        # สั่งให้มันอ่าน "ชีทแรกสุด" อัตโนมัติ (วิธีนี้แก้ Error 400 ได้ชัวร์ที่สุด)
+        df = conn.read(ttl=0)
         
         required_cols = [
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
@@ -47,7 +47,7 @@ def load_and_clean_data():
         if df.empty or len(df.columns) < len(required_cols):
              df = pd.DataFrame(columns=required_cols)
         
-        # ... (ส่วน Clean Data ข้างล่างเหมือนเดิมทุกประการ) ...
+        # ... (ส่วน Clean Data เหมือนเดิม) ...
         col_map = {
             'Date': 'วันที่', 'Time': 'เวลา', 'Platform': 'แอป',
             'Category': 'หมวดหมู่', 'SubCategory': 'รายการ',
@@ -58,6 +58,7 @@ def load_and_clean_data():
             'Payment_Method': 'ช่องทางรับเงิน',
             'Cash_In': 'เงินสดเข้าตัว'
         }
+        # Rename เฉพาะคอลัมน์ที่มีอยู่จริง
         df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
         
         if 'ช่องทางรับเงิน' not in df.columns: df['ช่องทางรับเงิน'] = 'ไม่ระบุ'
@@ -81,7 +82,7 @@ def load_and_clean_data():
             'เงินสดเข้าตัว', 'เลขไมล์', 'หมายเหตุ'
         ])
 
-# แก้ไขฟังก์ชัน save_data
+# --- ฟังก์ชันบันทึก (แก้ไขจุดสำคัญ) ---
 def save_data(df):
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
@@ -89,21 +90,19 @@ def save_data(df):
         if 'วันที่' in df_save.columns:
             df_save['วันที่'] = df_save['วันที่'].astype(str)
             
-        # ✅ แก้ตรงนี้: เปลี่ยนจาก "Sheet1" เป็น "Drivers"
+        # 🟢 แก้จุดที่ 2: ระบุชื่อ "Drivers" ให้ชัดเจนตอนบันทึก
         conn.update(worksheet="Drivers", data=df_save)
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
 if 'data' not in st.session_state:
     st.session_state.data = load_and_clean_data()
-    # ไม่ save ตอนโหลดครั้งแรก เพื่อลดการยิง Request ไป Google Sheets โดยไม่จำเป็น
 
-# --- 4. SIDEBAR (เหมือนเดิม) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ ตั้งค่า")
     st.caption(f"เวลา: {get_thai_time().strftime('%H:%M')}")
     
-    # เพิ่มปุ่ม Refresh ข้อมูลจาก Cloud
     if st.button("🔄 ดึงข้อมูลล่าสุด (Cloud)"):
         st.session_state.data = load_and_clean_data()
         st.rerun()
@@ -132,10 +131,9 @@ st.title("🚗 ระบบบันทึกรายได้")
 tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล"])
 
 # ==========================================
-# TAB 1: บันทึกงาน (เหมือนเดิม 100%)
+# TAB 1: บันทึกงาน
 # ==========================================
 with tab1:
-    # ... (โค้ดส่วนนี้เหมือนเดิมทุกประการ ไม่แตะต้อง) ...
     col_type, col_form = st.columns([1, 2])
     with col_type:
         st.subheader("เลือกรายการ")
@@ -147,23 +145,19 @@ with tab1:
     with col_form:
         st.container(border=True)
         
-        # --- 1. รับงาน ---
+        # 1. รับงาน
         if entry_type == "🚗 รับงานขับรถ":
             st.markdown("#### 📝 บันทึกรายได้")
             with st.form(key="form_income", clear_on_submit=True):
-                # แถว 1
                 c_app, c_pay = st.columns(2)
                 with c_app:
                     platform = st.selectbox("เลือกแอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"])
                 with c_pay:
                     pay_method = st.selectbox("ช่องทางรับเงิน", ["💵 เงินสด/โอน", "💳 ตัดบัตร/แอป"])
 
-                # แถว 2
                 c1, c2 = st.columns(2)
-                with c1: 
-                    app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0.00")
-                with c2: 
-                    real_receive = st.number_input("เงินที่รับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="เท่าหน้าแอป")
+                with c1: app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None)
+                with c2: real_receive = st.number_input("เงินที่รับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None)
                 
                 note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
                 submitted = st.form_submit_button("บันทึกรายได้ ✅", type="primary", use_container_width=True)
@@ -174,381 +168,239 @@ with tab1:
                     
                     if price_val > 0 or real_val > 0:
                         if real_val == 0: real_val = price_val 
-                        
                         tip = max(0, real_val - price_val)
-                        total_income = real_val 
                         
-                        # คำนวณเงินสดเข้าตัว
-                        cash_in_hand = 0.0
-                        if pay_method == "💵 เงินสด/โอน":
-                            cash_in_hand = real_val
-                        else:
-                            cash_in_hand = 0.0 
+                        cash_in_hand = real_val if pay_method == "💵 เงินสด/โอน" else 0.0
                         
                         new_row = {
                             'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                             'แอป': platform, 'หมวดหมู่': 'รายรับ', 'รายการ': 'ค่าโดยสาร', 'ช่องทางรับเงิน': pay_method,
                             'ยอดเต็ม/หน้าแอป': price_val, 'หัก/จ่าย': 0, 'ทิป': tip, 
-                            'คงเหลือ/สุทธิ': total_income, 
-                            'เงินสดเข้าตัว': cash_in_hand, 
+                            'คงเหลือ/สุทธิ': real_val, 'เงินสดเข้าตัว': cash_in_hand, 
                             'เลขไมล์': 0, 'หมายเหตุ': note
                         }
                         st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
                         save_data(st.session_state.data)
-                        
-                        msg = f"บันทึกรายได้ {total_income:.0f} บาท"
-                        if tip > 0: msg += f" (ทิป {tip:.0f})"
-                        st.toast(msg)
+                        st.toast(f"บันทึกรายได้ {real_val:.0f} บาท")
                         st.rerun()
-                    else:
-                        st.warning("กรุณากรอกยอดเงิน")
+                    else: st.warning("กรุณากรอกยอดเงิน")
 
-        # --- 2. เติมเครดิต (รายจ่าย) ---
+        # 2. เติมเครดิต
         elif entry_type == "💳 เติมเครดิตแอป":
-            st.markdown("#### 💳 เติมเงินเข้าแอป (นับเป็นค่าใช้จ่าย)")
+            st.markdown("#### 💳 เติมเงินเข้าแอป")
             with st.form(key="form_topup", clear_on_submit=True):
                 sub_cat = st.selectbox("แอปไหน", ["Grab Wallet", "Bolt", "Maxim", "Line Man", "Robinhood"])
-                cost = st.number_input("จำนวนเงินที่เติม", min_value=0.0, value=None, placeholder="0.00")
+                cost = st.number_input("จำนวนเงินที่เติม", min_value=0.0)
                 submitted = st.form_submit_button("บันทึกรายจ่าย 💾", type="primary", use_container_width=True)
                 
                 if submitted:
-                    cost_val = cost if cost is not None else 0.0
+                    cost_val = cost if cost else 0.0
                     if cost_val > 0:
                         new_row = {
                             'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                             'แอป': sub_cat, 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'เติมเครดิต', 'ช่องทางรับเงิน': 'จ่ายสด',
                             'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost_val, 'ทิป': 0, 
-                            'คงเหลือ/สุทธิ': -cost_val, 
-                            'เงินสดเข้าตัว': -cost_val,
-                            'เลขไมล์': 0, 'หมายเหตุ': 'Top-up'
+                            'คงเหลือ/สุทธิ': -cost_val, 'เงินสดเข้าตัว': -cost_val, 'เลขไมล์': 0, 'หมายเหตุ': 'Top-up'
                         }
                         st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
                         save_data(st.session_state.data)
-                        st.toast(f"บันทึกเติมเงิน {cost_val} บาทแล้ว")
+                        st.toast("บันทึกแล้ว")
                         st.rerun()
-                    else: st.warning("กรุณากรอกจำนวนเงิน")
 
-        # --- 3. น้ำมัน/ไฟ ---
+        # 3. พลังงาน
         elif entry_type == "⛽ เติมน้ำมัน/ชาร์จไฟ":
             st.markdown("#### ⚡ ต้นทุนพลังงาน")
             with st.form(key="form_energy", clear_on_submit=True):
                 e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
-                default_val = None
-                if e_type == "⚡ ชาร์จบ้าน (เหมา)": default_val = float(ev_home_rate)
-                cost = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, value=default_val, placeholder="0.00")
+                default_val = float(ev_home_rate) if e_type == "⚡ ชาร์จบ้าน (เหมา)" else None
+                cost = st.number_input("จำนวนเงิน", min_value=0.0, value=default_val)
                 note = st.text_input("สถานที่")
-                submitted = st.form_submit_button("บันทึกค่าใช้จ่าย 💾", type="primary", use_container_width=True)
-                if submitted:
-                    cost_val = cost if cost is not None else 0.0
-                    if cost_val > 0:
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ค่าน้ำมัน/ไฟ', 'ช่องทางรับเงิน': 'จ่ายสด',
-                            'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost_val, 'ทิป': 0, 
-                            'คงเหลือ/สุทธิ': -cost_val, 
-                            'เงินสดเข้าตัว': -cost_val,
-                            'เลขไมล์': 0, 'หมายเหตุ': f"{e_type} - {note}"
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.toast("บันทึกเรียบร้อย")
-                        st.rerun()
-                    else: st.warning("กรุณากรอกจำนวนเงิน")
+                submitted = st.form_submit_button("บันทึก 💾", type="primary", use_container_width=True)
+                if submitted and cost > 0:
+                    new_row = {
+                        'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
+                        'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ค่าน้ำมัน/ไฟ', 'ช่องทางรับเงิน': 'จ่ายสด',
+                        'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 
+                        'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 'หมายเหตุ': f"{e_type} - {note}"
+                    }
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.rerun()
 
-        # --- 4. ไมล์ ---
+        # 4. ไมล์
         elif entry_type == "🕒 เริ่มงาน/เลิกงาน (เลขไมล์)":
             st.markdown("#### 🕒 บันทึกเลขไมล์")
             with st.form(key="form_odom", clear_on_submit=True):
                 shift_type = st.radio("สถานะ", ["☀️ เริ่มงาน", "🌙 เลิกงาน"], horizontal=True)
-                last_odom = 0.0
-                if not st.session_state.data.empty: last_odom = st.session_state.data['เลขไมล์'].max()
-                st.caption(f"เลขไมล์ล่าสุด: {last_odom:,.0f}")
-                odometer = st.number_input("เลขไมล์หน้าปัด", min_value=0.0, step=1.0, value=None, placeholder="กรอกเลขไมล์")
-                submitted = st.form_submit_button("บันทึกเลขไมล์ 💾", type="primary", use_container_width=True)
-                if submitted:
-                    odom_val = odometer if odometer is not None else 0.0
-                    if odom_val > 0:
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': 'ระบบ', 'หมวดหมู่': 'กะงาน', 'รายการ': shift_type, 'ช่องทางรับเงิน': '-',
-                            'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': 0, 'ทิป': 0, 'คงเหลือ/สุทธิ': 0, 'เงินสดเข้าตัว': 0,
-                            'เลขไมล์': odom_val, 'หมายเหตุ': f"เลขไมล์ {shift_type}"
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.toast(f"บันทึก {shift_type} แล้ว")
-                        st.rerun()
-                    else: st.error("กรุณากรอกเลขไมล์")
+                odometer = st.number_input("เลขไมล์หน้าปัด", min_value=0.0)
+                submitted = st.form_submit_button("บันทึก 💾", type="primary", use_container_width=True)
+                if submitted and odometer > 0:
+                    new_row = {
+                        'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
+                        'แอป': 'ระบบ', 'หมวดหมู่': 'กะงาน', 'รายการ': shift_type, 'ช่องทางรับเงิน': '-',
+                        'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': 0, 'ทิป': 0, 'คงเหลือ/สุทธิ': 0, 'เงินสดเข้าตัว': 0,
+                        'เลขไมล์': odometer, 'หมายเหตุ': f"เลขไมล์ {shift_type}"
+                    }
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.rerun()
 
-        # --- 5. จ่ายอื่นๆ ---
+        # 5. จ่ายอื่น
         elif entry_type == "🛠️ จ่ายอื่นๆ":
             st.markdown(f"#### 🛠️ จ่ายทั่วไป")
             with st.form(key="form_other", clear_on_submit=True):
-                item_name = "ทั่วไป"
                 sub_cat = st.text_input("รายการ (เช่น ข้าว, ปะยาง)")
-                cost = st.number_input("จำนวนเงิน", min_value=0.0, value=None, placeholder="0.00")
+                cost = st.number_input("จำนวนเงิน", min_value=0.0)
                 submitted = st.form_submit_button("บันทึก 💾", type="primary", use_container_width=True)
-                if submitted:
-                    cost_val = cost if cost is not None else 0.0
-                    if cost_val > 0:
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': item_name, 'ช่องทางรับเงิน': 'จ่ายสด',
-                            'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost_val, 'ทิป': 0, 
-                            'คงเหลือ/สุทธิ': -cost_val, 
-                            'เงินสดเข้าตัว': -cost_val,
-                            'เลขไมล์': 0, 'หมายเหตุ': sub_cat
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.toast("บันทึกเรียบร้อย")
-                        st.rerun()
-                    else: st.warning("กรุณากรอกจำนวนเงิน")
+                if submitted and cost > 0:
+                    new_row = {
+                        'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
+                        'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ทั่วไป', 'ช่องทางรับเงิน': 'จ่ายสด',
+                        'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 
+                        'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 'หมายเหตุ': sub_cat
+                    }
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.rerun()
     st.markdown("<br>" * 5, unsafe_allow_html=True)
 
 # ==========================================
-# TAB 2: สรุปผล (เพิ่มกราฟสวยงามตามคำขอ)
+# TAB 2: สรุปผล
 # ==========================================
 with tab2:
     st.markdown("### 📊 แดชบอร์ดสรุปผลละเอียด")
-    time_filter = st.selectbox(
-        "📅 เลือกช่วงเวลา:",
-        ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง (เลือกวันที่)"]
-    )
+    time_filter = st.selectbox("📅 เลือกช่วงเวลา:", ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"])
     
-    custom_start = None
-    custom_end = None
-    if time_filter == "กำหนดเอง (เลือกวันที่)":
-        st.info("👇 จิ้มปฏิทินเลือกช่วงเวลา")
-        date_range = st.date_input("ช่วงวันที่:", value=(get_thai_date(), get_thai_date()))
-        if len(date_range) == 2: custom_start, custom_end = date_range
+    custom_start, custom_end = None, None
+    if time_filter == "กำหนดเอง":
+        dr = st.date_input("ช่วงวันที่:", value=(get_thai_date(), get_thai_date()))
+        if len(dr) == 2: custom_start, custom_end = dr
     
     df = st.session_state.data
     if not df.empty:
         today = get_thai_date()
-        filtered_df = df.copy()
+        f_df = df.copy()
         
-        # --- Date Filtering ---
-        if time_filter == "วันนี้": filtered_df = df[df['วันที่'] == today]
-        elif time_filter == "เมื่อวาน": filtered_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
+        # Filter Logic
+        if time_filter == "วันนี้": f_df = df[df['วันที่'] == today]
+        elif time_filter == "เมื่อวาน": f_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
         elif time_filter == "สัปดาห์นี้":
-            start_week = today - datetime.timedelta(days=today.weekday())
-            filtered_df = df[(df['วันที่'] >= start_week) & (df['วันที่'] <= start_week + datetime.timedelta(days=6))]
-        elif time_filter == "เดือนนี้": filtered_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
+            start = today - datetime.timedelta(days=today.weekday())
+            f_df = df[(df['วันที่'] >= start) & (df['วันที่'] <= start + datetime.timedelta(days=6))]
+        elif time_filter == "เดือนนี้": f_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
         elif time_filter == "เดือนที่แล้ว":
             first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
-            filtered_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
-        elif time_filter == "ปีนี้": filtered_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
-        elif time_filter == "กำหนดเอง (เลือกวันที่)" and custom_start:
-            filtered_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
-        elif time_filter == "กำหนดเอง (เลือกวันที่)": filtered_df = pd.DataFrame()
+            f_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
+        elif time_filter == "ปีนี้": f_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
+        elif time_filter == "กำหนดเอง" and custom_start:
+            f_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
 
-        if not filtered_df.empty:
-            # 1. ระยะทาง & เวลา (Logic เดิม)
-            odom_df = filtered_df[filtered_df['เลขไมล์'] > 0]
-            daily_dist = 0
-            if not odom_df.empty:
-                daily_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
-                daily_dist = (daily_odom['max'] - daily_odom['min']).sum()
-            total_km = daily_dist if daily_dist > 0 else filtered_df['ระยะทาง(กม.)'].sum()
-
-            shift_df = filtered_df[filtered_df['หมวดหมู่'] == 'กะงาน']
-            total_hours = 0
-            if not shift_df.empty:
-                for d in shift_df['วันที่'].unique():
-                    day_shifts = shift_df[shift_df['วันที่'] == d]
-                    starts = day_shifts[day_shifts['รายการ'].str.contains("เริ่ม")]['เวลา']
-                    ends = day_shifts[day_shifts['รายการ'].str.contains("เลิก")]['เวลา']
-                    if not starts.empty and not ends.empty:
-                        try:
-                            t_s = pd.to_datetime(starts.min(), format='%H:%M')
-                            t_e = pd.to_datetime(ends.max(), format='%H:%M')
-                            h = (t_e - t_s).total_seconds() / 3600
-                            if h < 0: h += 24
-                            total_hours += h
-                        except: pass
-
-            # 2. การเงิน
-            inc_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายรับ']
-            exp_df = filtered_df[filtered_df['หมวดหมู่'] == 'รายจ่าย']
+        if not f_df.empty:
+            # Metrics Calculation
+            inc_df = f_df[f_df['หมวดหมู่'] == 'รายรับ']
+            exp_df = f_df[f_df['หมวดหมู่'] == 'รายจ่าย']
             
             total_inc = inc_df['คงเหลือ/สุทธิ'].sum()
-            # รายจ่ายรวม
-            total_expense = exp_df['หัก/จ่าย'].sum()
-            net = total_inc - total_expense
-            cash_in_hand = filtered_df['เงินสดเข้าตัว'].sum()
+            total_exp = exp_df['หัก/จ่าย'].sum()
+            net = total_inc - total_exp
+            cash = f_df['เงินสดเข้าตัว'].sum()
+            
+            # Distance
+            odom_df = f_df[f_df['เลขไมล์'] > 0]
+            dist = 0
+            if not odom_df.empty:
+                d_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
+                dist = (d_odom['max'] - d_odom['min']).sum()
+            
+            # Hours
+            hours = 0
+            shift_df = f_df[f_df['หมวดหมู่'] == 'กะงาน']
+            if not shift_df.empty:
+                for d in shift_df['วันที่'].unique():
+                    ds = shift_df[shift_df['วันที่'] == d]
+                    s = ds[ds['รายการ'].str.contains("เริ่ม")]['เวลา']
+                    e = ds[ds['รายการ'].str.contains("เลิก")]['เวลา']
+                    if not s.empty and not e.empty:
+                        try:
+                            ts = pd.to_datetime(s.min(), format='%H:%M')
+                            te = pd.to_datetime(e.max(), format='%H:%M')
+                            h = (te - ts).total_seconds()/3600
+                            if h < 0: h += 24
+                            hours += h
+                        except: pass
 
-            st.caption(f"สรุปยอด: {time_filter}")
-            
-            # --- ส่วน Metrics (เหมือนเดิม) ---
-            st.container(border=True).markdown(f"### 💵 เงินสดที่จับต้องได้จริง: {cash_in_hand:,.0f} บาท")
-            
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("💰 กำไรสุทธิ", f"{net:,.0f}", help="รายได้งาน - รายจ่ายรวม")
-            m2.metric("💸 รายจ่ายรวม", f"{total_expense:,.0f}")
-            m3.metric("🛣️ วิ่ง(กม.)", f"{total_km:,.0f}")
-            m4.metric("⏱️ เวลางาน", f"{total_hours:.1f} ชม.")
+            # Display Metrics
+            st.container(border=True).markdown(f"### 💵 เงินสดเข้าตัว: {cash:,.0f} บาท")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💰 กำไรสุทธิ", f"{net:,.0f}")
+            c2.metric("💸 รายจ่าย", f"{total_exp:,.0f}")
+            c3.metric("🛣️ ระยะทาง", f"{dist:,.0f} กม.")
+            c4.metric("⏱️ ชั่วโมงงาน", f"{hours:.1f} ชม.")
             
             st.divider()
-            
-            # สถิติย่อย
-            s1, s2 = st.columns(2)
-            if total_km > 0: s1.metric("📊 รายได้/กม.", f"{total_inc/total_km:.1f} บ.")
-            if total_hours > 0: s2.metric("💵 รายได้/ชม.", f"{total_inc/total_hours:.0f} บ.")
-            
-            # --- รายการย่อย (เหมือนเดิม) ---
-            if time_filter in ["วันนี้", "เมื่อวาน"]:
-                with st.expander("ดูรายการงานที่วิ่ง"):
-                    cols = ['เวลา', 'แอป', 'ยอดเต็ม/หน้าแอป', 'ทิป', 'คงเหลือ/สุทธิ', 'ช่องทางรับเงิน']
-                    st.dataframe(inc_df[cols], use_container_width=True)
 
-            st.divider()
-            
-            # ===============================================
-            # 🚀 ZONE กราฟสวยงาม (เพิ่มความละเอียดตรงนี้)
-            # ===============================================
-            
-            # 🎨 กำหนดชุดสีเดิมที่คุณชอบ
-            APP_COLORS = {
-                "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", 
-                "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", 
-                "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6"
-            }
-            
-            # --- แถว 1: แนวโน้มรายได้ + สัดส่วน ---
+            # Graphs
+            APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
+
             g1, g2 = st.columns([2, 1])
             with g1:
-                # กราฟ 1: แนวโน้มรายได้ (Area Chart) - ดูดีกว่า Bar Chart ธรรมดา
                 if not inc_df.empty:
-                    daily_inc = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
-                    fig_trend = px.area(
-                        daily_inc, x='วันที่', y='คงเหลือ/สุทธิ', 
-                        title="📈 แนวโน้มรายได้ (Area Chart)", markers=True,
-                        color_discrete_sequence=['#2E86C1'] # สีน้ำเงินสวยๆ
-                    )
-                    st.plotly_chart(fig_trend, use_container_width=True)
-                else:
-                    st.info("ไม่มีข้อมูลกราฟแนวโน้ม")
-            
+                    daily = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
+                    st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 แนวโน้มรายได้", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
             with g2:
-                # กราฟ 2: สัดส่วนรายได้แยกแอป (Donut Chart) - แทน Bar Chart เดิม
-                if not inc_df.empty: 
-                    fig_donut = px.pie(
-                        inc_df, values='คงเหลือ/สุทธิ', names='แอป', 
-                        title="🍩 รายได้แยกแอป", hole=0.4,
-                        color='แอป', color_discrete_map=APP_COLORS
-                    )
-                    fig_donut.update_traces(textposition='inside', textinfo='percent+label')
-                    fig_donut.update_layout(showlegend=False)
-                    st.plotly_chart(fig_donut, use_container_width=True)
-                else:
-                    st.info("ไม่มีข้อมูลกราฟสัดส่วน")
+                if not inc_df.empty:
+                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนรายได้", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
 
-            # --- แถว 2: เจาะลึกช่วงเวลา + วิธีรับเงิน ---
             g3, g4 = st.columns(2)
-            
             with g3:
-                 # กราฟ 3: Heatmap ช่วงเวลาทำเงิน (ดูว่าชั่วโมงไหนงานเข้าเยอะสุด)
                 if not inc_df.empty:
-                    # สร้าง column ชั่วโมงชั่วคราวเพื่อทำกราฟ
-                    temp_df = inc_df.copy()
-                    temp_df['Hour'] = pd.to_datetime(temp_df['เวลา'], format='%H:%M').dt.hour
-                    
-                    heatmap_data = temp_df.pivot_table(index='แอป', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum', fill_value=0)
-                    if not heatmap_data.empty:
-                        fig_heat = px.imshow(
-                            heatmap_data, 
-                            title="🔥 ช่วงเวลาทำเงิน (Heatmap)",
-                            labels=dict(x="นาฬิกา", y="แอป", color="รายได้"),
-                            x=heatmap_data.columns, y=heatmap_data.index,
-                            aspect="auto", color_continuous_scale="Greens"
-                        )
-                        st.plotly_chart(fig_heat, use_container_width=True)
-                
+                    temp = inc_df.copy()
+                    temp['Hour'] = pd.to_datetime(temp['เวลา'], format='%H:%M').dt.hour
+                    hm = temp.pivot_table(index='แอป', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum', fill_value=0)
+                    if not hm.empty:
+                        st.plotly_chart(px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens"), use_container_width=True)
             with g4:
-                # กราฟ 4: Sunburst (แอป -> วิธีรับเงิน)
                 if not inc_df.empty:
-                    fig_sun = px.sunburst(
-                        inc_df, path=['แอป', 'ช่องทางรับเงิน'], values='คงเหลือ/สุทธิ',
-                        title="☀️ เจาะลึกแหล่งที่มารายได้",
-                        color='แอป', color_discrete_map=APP_COLORS
-                    )
-                    st.plotly_chart(fig_sun, use_container_width=True)
+                    st.plotly_chart(px.sunburst(inc_df, path=['แอป', 'ช่องทางรับเงิน'], values='คงเหลือ/สุทธิ', title="☀️ แหล่งที่มาเงิน", color='แอป', color_discrete_map=APP_COLORS), use_container_width=True)
 
-            # --- แถว 3: รายจ่าย (เหมือนเดิมแต่ปรับ Pie Chart) ---
-            if not exp_df.empty: 
-                st.plotly_chart(px.pie(
-                    exp_df, values='หัก/จ่าย', names='รายการ', 
-                    title="💸 สัดส่วนรายจ่าย", hole=0.4
-                ), use_container_width=True)
-
-        else: st.warning(f"ไม่พบข้อมูล: {time_filter}")
-    else: st.info("ยังไม่มีข้อมูล")
+        else: st.warning("ไม่พบข้อมูลในช่วงเวลานี้")
+    else: st.info("ยังไม่มีข้อมูลในระบบ")
 
 # ==========================================
-# TAB 3: ฐานข้อมูล (เหมือนเดิม 100% แก้แค่ Save)
+# TAB 3: ฐานข้อมูล
 # ==========================================
 with tab3:
-    st.subheader("🗂️ ฐานข้อมูล (ค้นหา ลบ และแก้ไข)")
+    st.subheader("🗂️ ฐานข้อมูล")
     
-    # --- ส่วนตัวกรอง ---
     with st.container(border=True):
-        st.write("🔍 **ตัวกรองค้นหา**")
-        fc1, fc2, fc3 = st.columns(3)
-        with fc1: f_app = st.multiselect("เลือกแอป:", options=st.session_state.data['แอป'].unique(), default=[], key="db_app_filter")
-        with fc2: f_cat = st.multiselect("หมวดหมู่:", options=st.session_state.data['หมวดหมู่'].unique(), default=[], key="db_cat_filter")
-        with fc3: f_date_mode = st.selectbox("ช่วงวันที่:", ["ทั้งหมด", "วันนี้", "เดือนนี้", "กำหนดเอง"], key="db_date_mode")
-    
-    # --- Logic การกรองข้อมูล ---
-    df_to_show = st.session_state.data.copy()
-    
-    if f_app: df_to_show = df_to_show[df_to_show['แอป'].isin(f_app)]
-    if f_cat: df_to_show = df_to_show[df_to_show['หมวดหมู่'].isin(f_cat)]
-    
-    today = get_thai_date()
-    if f_date_mode == "วันนี้": df_to_show = df_to_show[df_to_show['วันที่'] == today]
-    elif f_date_mode == "เดือนนี้": df_to_show = df_to_show[(pd.to_datetime(df_to_show['วันที่']).dt.month == today.month) & (pd.to_datetime(df_to_show['วันที่']).dt.year == today.year)]
-    elif f_date_mode == "กำหนดเอง":
-        d_range = st.date_input("เลือกช่วง:", value=(today, today), key="db_custom_date")
-        if len(d_range) == 2: df_to_show = df_to_show[(df_to_show['วันที่'] >= d_range[0]) & (df_to_show['วันที่'] <= d_range[1])]
+        c1, c2, c3 = st.columns(3)
+        f_app = c1.multiselect("แอป", st.session_state.data['แอป'].unique())
+        f_cat = c2.multiselect("หมวดหมู่", st.session_state.data['หมวดหมู่'].unique())
+        f_date = c3.selectbox("วันที่", ["ทั้งหมด", "วันนี้", "เดือนนี้"])
 
-    st.caption(f"พบข้อมูล: {len(df_to_show)} รายการ")
+    df_show = st.session_state.data.copy()
+    if f_app: df_show = df_show[df_show['แอป'].isin(f_app)]
+    if f_cat: df_show = df_show[df_show['หมวดหมู่'].isin(f_cat)]
+    if f_date == "วันนี้": df_show = df_show[df_show['วันที่'] == get_thai_date()]
+    elif f_date == "เดือนนี้": 
+        t = get_thai_date()
+        df_show = df_show[(pd.to_datetime(df_show['วันที่']).dt.month == t.month) & (pd.to_datetime(df_show['วันที่']).dt.year == t.year)]
 
-    if not df_to_show.empty:
-        # กำหนดคอลัมน์ที่จะแสดง
-        display_cols = ['วันที่', 'เวลา', 'แอป', 'รายการ', 'ช่องทางรับเงิน', 'ยอดเต็ม/หน้าแอป', 'ทิป', 'คงเหลือ/สุทธิ', 'เงินสดเข้าตัว', 'หมายเหตุ']
-        valid_cols = [c for c in display_cols if c in df_to_show.columns]
+    if not df_show.empty:
+        edited = st.data_editor(df_show, num_rows="dynamic", use_container_width=True, key="editor")
         
-        # แสดงตารางแบบแก้ไขได้
-        edited_df = st.data_editor(
-            df_to_show[valid_cols].sort_values(by=["วันที่", "เวลา"], ascending=False),
-            num_rows="dynamic", # อนุญาตให้เพิ่ม/ลบแถวได้
-            use_container_width=True,
-            key="data_editor_main"
-        )
-        
-        if st.button("💾 บันทึกการเปลี่ยนแปลง (ลง Cloud)", type="primary"):
+        if st.button("💾 บันทึกการเปลี่ยนแปลง", type="primary"):
             try:
-                # 1. หาแถวที่ถูกลบ
-                original_indices = set(df_to_show.index)
-                current_indices = set(edited_df.index)
-                deleted_indices = original_indices - current_indices
+                orig_idx = set(df_show.index)
+                curr_idx = set(edited.index)
+                deleted = orig_idx - curr_idx
                 
-                # 2. ลบแถวเหล่านั้นออกจาก Database หลัก
-                if deleted_indices:
-                    st.session_state.data = st.session_state.data.drop(list(deleted_indices))
-                
-                # 3. อัปเดตข้อมูลที่เหลือ
-                st.session_state.data.update(edited_df)
-                
-                # 4. บันทึก (เรียกฟังก์ชัน Save ลง Google Sheets)
+                if deleted: st.session_state.data = st.session_state.data.drop(list(deleted))
+                st.session_state.data.update(edited)
                 save_data(st.session_state.data)
-                
-                st.success(f"✅ บันทึกลง Google Sheets สำเร็จ! (ลบ {len(deleted_indices)} รายการ, อัปเดตข้อมูลล่าสุด)")
+                st.success("บันทึกสำเร็จ!")
                 st.rerun()
-                
-            except Exception as e:
-                st.error(f"เกิดข้อผิดพลาด: {e}")
-    else:
-        st.info("ไม่พบข้อมูลตามเงื่อนไข")
-
+            except Exception as e: st.error(f"Error: {e}")
