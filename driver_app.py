@@ -417,6 +417,124 @@ with tab2:
             APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
 
             col_g1, col_g2 = st.columns([2, 1])
+# ==========================================
+# TAB 2: สรุปผล (แก้ไข Bug: ย้าย import calendar ให้ถูกต้อง)
+# ==========================================
+import calendar  # 🟢 เพิ่มบรรทัดนี้เพื่อเรียกใช้ปฏิทิน
+
+with tab2:
+    st.markdown("### 📊 แดชบอร์ดวิเคราะห์ผลงาน")
+    
+    # 1. ตัวเลือกช่วงเวลา
+    c_filter, c_blank = st.columns([2, 3])
+    with c_filter:
+        time_filter = st.selectbox("📅 เลือกช่วงเวลา:", ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"])
+    
+    custom_start, custom_end = None, None
+    if time_filter == "กำหนดเอง":
+        dr = st.date_input("ช่วงวันที่:", value=(get_thai_date(), get_thai_date()))
+        if len(dr) == 2: custom_start, custom_end = dr
+    
+    df = st.session_state.data
+    if not df.empty:
+        today = get_thai_date()
+        f_df = df.copy()
+        
+        # ตัวแปรสำหรับคำนวณเป้าหมาย (Days Multiplier)
+        days_count = 1 
+        
+        # Filter Logic & Days Calculation
+        if time_filter == "วันนี้": 
+            f_df = df[df['วันที่'] == today]
+            days_count = 1
+        elif time_filter == "เมื่อวาน": 
+            f_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
+            days_count = 1
+        elif time_filter == "สัปดาห์นี้":
+            start = today - datetime.timedelta(days=today.weekday())
+            f_df = df[(df['วันที่'] >= start) & (df['วันที่'] <= start + datetime.timedelta(days=6))]
+            days_count = 7
+        elif time_filter == "เดือนนี้": 
+            f_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
+            # 🟢 คำนวณวันในเดือนนี้ (ใช้ calendar ได้แล้ว)
+            days_count = calendar.monthrange(today.year, today.month)[1]
+        elif time_filter == "เดือนที่แล้ว":
+            first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
+            f_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
+            # 🟢 คำนวณวันในเดือนที่แล้ว
+            days_count = calendar.monthrange(start_prev.year, start_prev.month)[1]
+        elif time_filter == "ปีนี้": 
+            f_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
+            days_count = 365
+        elif time_filter == "กำหนดเอง" and custom_start and custom_end:
+            f_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
+            days_count = (custom_end - custom_start).days + 1
+
+        if not f_df.empty:
+            # --- คำนวณตัวเลข ---
+            inc_df = f_df[f_df['หมวดหมู่'] == 'รายรับ']
+            exp_df = f_df[f_df['หมวดหมู่'] == 'รายจ่าย']
+            
+            total_inc = inc_df['คงเหลือ/สุทธิ'].sum()
+            total_exp = exp_df['หัก/จ่าย'].sum()
+            net = total_inc - total_exp
+            cash = f_df['เงินสดเข้าตัว'].sum()
+            
+            # คำนวณระยะทาง
+            odom_df = f_df[f_df['เลขไมล์'] > 0]
+            dist = 0
+            if not odom_df.empty:
+                d_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
+                dist = (d_odom['max'] - d_odom['min']).sum()
+            
+            # คำนวณชั่วโมง
+            hours = 0
+            shift_df = f_df[f_df['หมวดหมู่'] == 'กะงาน']
+            if not shift_df.empty:
+                for d in shift_df['วันที่'].unique():
+                    ds = shift_df[shift_df['วันที่'] == d]
+                    s = ds[ds['รายการ'].str.contains("เริ่ม")]['เวลา']
+                    e = ds[ds['รายการ'].str.contains("เลิก")]['เวลา']
+                    if not s.empty and not e.empty:
+                        try:
+                            ts = pd.to_datetime(s.min(), format='%H:%M')
+                            te = pd.to_datetime(e.max(), format='%H:%M')
+                            h = (te - ts).total_seconds()/3600
+                            if h < 0: h += 24
+                            hours += h
+                        except: pass
+            
+            # --- 🎯 ส่วนเป้าหมาย ---
+            total_target = target_income * days_count
+            
+            st.markdown(f"**🎯 เป้าหมาย ({time_filter}): {total_inc:,.0f} / {total_target:,.0f} บาท**")
+            progress = min(total_inc / total_target, 1.0) if total_target > 0 else 0
+            st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}% ({total_inc:,.0f} บาท)")
+
+            # --- 📈 ส่วนแสดงผล Metrics ---
+            st.markdown("#### 💎 ประสิทธิภาพการขับ")
+            
+            baht_per_km = net / dist if dist > 0 else 0
+            baht_per_hr = net / hours if hours > 0 else 0
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("💰 กำไรสุทธิ", f"{net:,.0f} บ.", help="รายรับ - รายจ่าย")
+            m2.metric("🛣️ ระยะทาง", f"{dist:,.0f} กม.")
+            m3.metric("⚡ บาท / กม.", f"{baht_per_km:.2f} บ.", delta_color="normal", help="ควรมากกว่า 5-10 บาท")
+            m4.metric("⏱️ บาท / ชม.", f"{baht_per_hr:.0f} บ.", help="ค่าแรงต่อชั่วโมง")
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💵 เงินสดเข้าตัว", f"{cash:,.0f} บ.")
+            c2.metric("💸 รายจ่ายรวม", f"{total_exp:,.0f} บ.")
+            c3.metric("⏳ ชั่วโมงขับ", f"{hours:.1f} ชม.")
+            c4.metric("📝 จำนวนงาน", f"{len(inc_df)} งาน")
+            
+            st.divider()
+
+            # --- 📊 กราฟ ---
+            APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
+
+            col_g1, col_g2 = st.columns([2, 1])
             with col_g1:
                 if not inc_df.empty:
                     daily = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
@@ -502,6 +620,7 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
 
