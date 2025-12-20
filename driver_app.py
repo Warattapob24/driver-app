@@ -123,6 +123,10 @@ with st.sidebar:
         st.toast("บันทึกค่าไฟแล้ว!")
     
     ev_home_rate = new_ev_rate
+
+    st.divider()
+    st.markdown("### 🎯 เป้าหมายรายวัน")
+    target_income = st.number_input("ตั้งเป้ารายได้ (บาท)", value=2000, step=100)
     
     st.divider()
     if st.button("⚠️ ล้างข้อมูลทั้งหมด", type="primary"):
@@ -294,11 +298,15 @@ with tab1:
     st.markdown("<br>" * 5, unsafe_allow_html=True)
 
 # ==========================================
-# TAB 2: สรุปผล (เหมือนเดิม)
+# TAB 2: สรุปผล (Upgrade: เพิ่มความคุ้มค่า + เป้าหมาย)
 # ==========================================
 with tab2:
-    st.markdown("### 📊 แดชบอร์ดสรุปผลละเอียด")
-    time_filter = st.selectbox("📅 เลือกช่วงเวลา:", ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"])
+    st.markdown("### 📊 แดชบอร์ดวิเคราะห์ผลงาน")
+    
+    # 1. ตัวเลือกช่วงเวลา
+    c_filter, c_blank = st.columns([2, 3])
+    with c_filter:
+        time_filter = st.selectbox("📅 เลือกช่วงเวลา:", ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"])
     
     custom_start, custom_end = None, None
     if time_filter == "กำหนดเอง":
@@ -325,7 +333,7 @@ with tab2:
             f_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
 
         if not f_df.empty:
-            # Metrics Calculation
+            # --- คำนวณตัวเลข ---
             inc_df = f_df[f_df['หมวดหมู่'] == 'รายรับ']
             exp_df = f_df[f_df['หมวดหมู่'] == 'รายจ่าย']
             
@@ -334,14 +342,14 @@ with tab2:
             net = total_inc - total_exp
             cash = f_df['เงินสดเข้าตัว'].sum()
             
-            # Distance
+            # คำนวณระยะทาง (Distance)
             odom_df = f_df[f_df['เลขไมล์'] > 0]
             dist = 0
             if not odom_df.empty:
                 d_odom = odom_df.groupby('วันที่')['เลขไมล์'].agg(['min', 'max'])
                 dist = (d_odom['max'] - d_odom['min']).sum()
             
-            # Hours
+            # คำนวณชั่วโมง (Hours)
             hours = 0
             shift_df = f_df[f_df['หมวดหมู่'] == 'กะงาน']
             if not shift_df.empty:
@@ -357,43 +365,70 @@ with tab2:
                             if h < 0: h += 24
                             hours += h
                         except: pass
+            
+            # --- 🎯 ส่วนเป้าหมาย (เฉพาะดูรายวัน/เดือน) ---
+            if time_filter in ["วันนี้", "เดือนนี้"]:
+                st.markdown(f"**🎯 เป้าหมาย ({time_filter}): {total_inc:,.0f} / {target_income:,.0f} บาท**")
+                progress = min(total_inc / target_income, 1.0) if target_income > 0 else 0
+                st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}%")
 
-            # Display Metrics
-            st.container(border=True).markdown(f"### 💵 เงินสดเข้าตัว: {cash:,.0f} บาท")
+            # --- 📈 ส่วนแสดงผล Metrics แบบใหม่ ---
+            st.markdown("#### 💎 ประสิทธิภาพการขับ")
+            
+            # คำนวณประสิทธิภาพ
+            baht_per_km = net / dist if dist > 0 else 0
+            baht_per_hr = net / hours if hours > 0 else 0
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("💰 กำไรสุทธิ", f"{net:,.0f} บ.", help="รายรับ - รายจ่าย")
+            m2.metric("🛣️ ระยะทาง", f"{dist:,.0f} กม.")
+            m3.metric("⚡ บาท / กม.", f"{baht_per_km:.2f} บ.", delta_color="normal", help="ควรมากกว่า 5-10 บาท")
+            m4.metric("⏱️ บาท / ชม.", f"{baht_per_hr:.0f} บ.", help="ค่าแรงต่อชั่วโมง")
+
+            # แถว 2: รายละเอียดการเงิน
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("💰 กำไรสุทธิ", f"{net:,.0f}")
-            c2.metric("💸 รายจ่าย", f"{total_exp:,.0f}")
-            c3.metric("🛣️ ระยะทาง", f"{dist:,.0f} กม.")
-            c4.metric("⏱️ ชั่วโมงงาน", f"{hours:.1f} ชม.")
+            c1.metric("💵 เงินสดเข้าตัว", f"{cash:,.0f} บ.")
+            c2.metric("💸 รายจ่ายรวม", f"{total_exp:,.0f} บ.")
+            c3.metric("⏳ ชั่วโมงขับ", f"{hours:.1f} ชม.")
+            c4.metric("📝 จำนวนงาน", f"{len(inc_df)} งาน")
             
             st.divider()
 
-            # Graphs
+            # --- 📊 กราฟ ---
             APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
 
-            g1, g2 = st.columns([2, 1])
-            with g1:
+            col_g1, col_g2 = st.columns([2, 1])
+            with col_g1:
                 if not inc_df.empty:
                     daily = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
-                    st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 แนวโน้มรายได้", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
-            with g2:
+                    st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 เส้นทางรายได้ (Net Income)", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
+            with col_g2:
+                # กราฟโดนัท (ปรับปรุงให้แสดงยอดเงินด้วย)
                 if not inc_df.empty:
-                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนรายได้", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
+                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนรายได้แต่ละแอป", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
                     fig.update_traces(textposition='inside', textinfo='percent+label')
-                    fig.update_layout(showlegend=False)
+                    fig.update_layout(showlegend=False, margin=dict(t=30, b=0, l=0, r=0))
                     st.plotly_chart(fig, use_container_width=True)
 
-            g3, g4 = st.columns(2)
-            with g3:
+            col_g3, col_g4 = st.columns(2)
+            with col_g3:
+                # Heatmap ช่วงเวลา
                 if not inc_df.empty:
                     temp = inc_df.copy()
                     temp['Hour'] = pd.to_datetime(temp['เวลา'], format='%H:%M').dt.hour
                     hm = temp.pivot_table(index='แอป', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum', fill_value=0)
                     if not hm.empty:
-                        st.plotly_chart(px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens"), use_container_width=True)
-            with g4:
-                if not inc_df.empty:
-                    st.plotly_chart(px.sunburst(inc_df, path=['แอป', 'ช่องทางรับเงิน'], values='คงเหลือ/สุทธิ', title="☀️ แหล่งที่มาเงิน", color='แอป', color_discrete_map=APP_COLORS), use_container_width=True)
+                        fig_hm = px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน (Hour Map)", aspect="auto", color_continuous_scale="Greens", labels=dict(x="เวลา (น.)", y="แอป", color="บาท"))
+                        st.plotly_chart(fig_hm, use_container_width=True)
+            
+            with col_g4:
+                # กราฟแท่งรายจ่าย (แยกประเภท)
+                if not exp_df.empty:
+                    exp_sum = exp_df.groupby('รายการ')['หัก/จ่าย'].sum().reset_index()
+                    fig_exp = px.bar(exp_sum, x='รายการ', y='หัก/จ่าย', title="💸 รายจ่ายแยกตามประเภท", color='รายการ', text_auto=True)
+                    st.plotly_chart(fig_exp, use_container_width=True)
+                else:
+                    st.info("ไม่มีรายจ่ายในช่วงนี้")
 
         else: st.warning("ไม่พบข้อมูลในช่วงเวลานี้")
     else: st.info("ยังไม่มีข้อมูลในระบบ")
@@ -451,4 +486,5 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
