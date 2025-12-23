@@ -22,17 +22,32 @@ def get_thai_time():
 def get_thai_date():
     return get_thai_time().date()
 
-# --- 2. SETTINGS ---
+# --- 2. SETTINGS (ฉบับ Cloud: จำค่าได้ตลอดไป) ---
 def load_settings():
-    default_settings = {"ev_rate": 40.0}
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r") as f: return json.load(f)
-        except: return default_settings
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    default_settings = {"ev_rate": 50.0} # 👈 ตั้งค่า Default ที่คุณชอบตรงนี้ได้เลย
+    try:
+        # อ่านจาก Tab ชื่อ "Settings"
+        df = conn.read(worksheet="Settings", ttl=0)
+        if not df.empty and 'Key' in df.columns and 'Value' in df.columns:
+            # แปลงข้อมูลในตารางเป็น Dict {Key: Value}
+            settings = dict(zip(df['Key'], df['Value']))
+            return settings
+    except Exception:
+        # กรณีหาชีทไม่เจอ ให้ใช้ค่า Default ไปก่อน
+        pass
     return default_settings
 
 def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f: json.dump(settings, f)
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    try:
+        # แปลงค่ากลับเป็นตาราง 2 คอลัมน์ (Key, Value) เพื่อบันทึก
+        # แปลงทุกค่าให้เป็น String ก่อนบันทึกเพื่อป้องกัน Error
+        data = [{'Key': k, 'Value': str(v)} for k, v in settings.items()]
+        df = pd.DataFrame(data)
+        conn.update(worksheet="Settings", data=df)
+    except Exception as e:
+        st.error(f"บันทึกค่าตั้งต้นไม่สำเร็จ: {e}")
 
 # --- 3. DATA LOADING ---
 def load_and_clean_data():
@@ -111,28 +126,29 @@ with st.sidebar:
     st.caption(f"เวลา: {get_thai_time().strftime('%H:%M')}")
     
     if st.button("🔄 รีเฟรชข้อมูล (Cloud)"):
-        st.cache_data.clear() # เคลียร์ cache
+        st.cache_data.clear()
         st.session_state.data = load_and_clean_data()
         st.rerun()
     
+    # โหลดค่าล่าสุดจาก Cloud
     current_settings = load_settings()
-    new_ev_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=float(current_settings.get("ev_rate", 40.0)), step=5.0)
     
-    if new_ev_rate != current_settings.get("ev_rate"):
-        save_settings({"ev_rate": new_ev_rate})
-        st.toast("บันทึกค่าไฟแล้ว!")
+    # ดึงค่าเดิมมาแสดง (ต้องแปลงเป็น float เสมอเพราะจาก Sheet อาจมาเป็น string)
+    saved_rate = float(current_settings.get("ev_rate", 50.0))
     
-    ev_home_rate = new_ev_rate
-
-    st.divider()
-    st.markdown("### 🎯 เป้าหมายรายวัน")
-    target_income = st.number_input("ตั้งเป้ารายได้ (บาท)", value=2000, step=100)
+    new_ev_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=saved_rate, step=5.0)
     
-    st.divider()
-    if st.button("⚠️ ล้างข้อมูลทั้งหมด", type="primary"):
-        st.session_state.data = st.session_state.data.iloc[0:0] # ล้างข้อมูลแต่เก็บ Header ไว้
-        save_data(st.session_state.data)
+    # ถ้าค่าเปลี่ยน -> บันทึกลง Cloud ทันที
+    if new_ev_rate != saved_rate:
+        current_settings["ev_rate"] = new_ev_rate
+        save_settings(current_settings)
+        st.toast(f"บันทึกค่าไฟ {new_ev_rate} บาท ลง Cloud แล้ว! ☁️")
+        # หน่วงเวลาเล็กน้อยเพื่อให้ Toast ขึ้น แล้วค่อยรีเฟรชค่า
+        import time
+        time.sleep(1)
         st.rerun()
+        
+    ev_home_rate = new_ev_rate
 
 # --- 5. MAIN APP ---
 st.title("🚗 ระบบบันทึกรายได้")
@@ -515,6 +531,7 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
 
