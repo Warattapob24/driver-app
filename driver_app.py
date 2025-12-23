@@ -25,30 +25,26 @@ def get_thai_date():
 # --- 2. SETTINGS (ฉบับ Cloud: จำค่าได้ตลอดไป) ---
 def load_settings():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    default_settings = {"ev_rate": 50.0} # 👈 ตั้งค่า Default ที่คุณชอบตรงนี้ได้เลย
+    # 🟢 เพิ่ม "target_income": 2000.0 เข้าไปในค่าเริ่มต้น
+    default_settings = {"ev_rate": 50.0, "target_income": 2000.0} 
     try:
-        # อ่านจาก Tab ชื่อ "Settings"
         df = conn.read(worksheet="Settings", ttl=0)
         if not df.empty and 'Key' in df.columns and 'Value' in df.columns:
-            # แปลงข้อมูลในตารางเป็น Dict {Key: Value}
             settings = dict(zip(df['Key'], df['Value']))
             return settings
     except Exception:
-        # กรณีหาชีทไม่เจอ ให้ใช้ค่า Default ไปก่อน
         pass
     return default_settings
 
 def save_settings(settings):
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        # แปลงค่ากลับเป็นตาราง 2 คอลัมน์ (Key, Value) เพื่อบันทึก
-        # แปลงทุกค่าให้เป็น String ก่อนบันทึกเพื่อป้องกัน Error
         data = [{'Key': k, 'Value': str(v)} for k, v in settings.items()]
         df = pd.DataFrame(data)
         conn.update(worksheet="Settings", data=df)
     except Exception as e:
         st.error(f"บันทึกค่าตั้งต้นไม่สำเร็จ: {e}")
-
+        
 # --- 3. DATA LOADING ---
 def load_and_clean_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -130,25 +126,57 @@ with st.sidebar:
         st.session_state.data = load_and_clean_data()
         st.rerun()
     
-    # โหลดค่าล่าสุดจาก Cloud
+    # 1. โหลดค่าล่าสุดจาก Cloud
     current_settings = load_settings()
     
-    # ดึงค่าเดิมมาแสดง (ต้องแปลงเป็น float เสมอเพราะจาก Sheet อาจมาเป็น string)
+    # ----------------------------------------
+    # ส่วนตั้งค่าไฟ (EV Rate)
+    # ----------------------------------------
     saved_rate = float(current_settings.get("ev_rate", 50.0))
-    
     new_ev_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=saved_rate, step=5.0)
     
-    # ถ้าค่าเปลี่ยน -> บันทึกลง Cloud ทันที
-    if new_ev_rate != saved_rate:
+    # ----------------------------------------
+    # 🟢 ส่วนตั้งเป้าหมาย (Target Income) - กู้คืนกลับมาแล้ว!
+    # ----------------------------------------
+    st.divider()
+    st.markdown("### 🎯 เป้าหมายรายวัน")
+    
+    saved_target = float(current_settings.get("target_income", 2000.0))
+    new_target = st.number_input("ตั้งเป้ารายได้ (บาท)", value=saved_target, step=100.0)
+    
+    # ตัวแปรสำหรับส่งไปใช้ใน Tab 2
+    target_income = new_target
+    ev_home_rate = new_ev_rate
+
+    # ----------------------------------------
+    # ระบบบันทึกอัตโนมัติ (Check & Save)
+    # ----------------------------------------
+    # ถ้าค่าใดค่าหนึ่งเปลี่ยน -> บันทึกลง Cloud ทันที
+    if new_ev_rate != saved_rate or new_target != saved_target:
         current_settings["ev_rate"] = new_ev_rate
+        current_settings["target_income"] = new_target
+        
         save_settings(current_settings)
-        st.toast(f"บันทึกค่าไฟ {new_ev_rate} บาท ลง Cloud แล้ว! ☁️")
-        # หน่วงเวลาเล็กน้อยเพื่อให้ Toast ขึ้น แล้วค่อยรีเฟรชค่า
+        st.toast(f"บันทึกการตั้งค่าลง Cloud แล้ว! ☁️")
+        
         import time
         time.sleep(1)
         st.rerun()
+    
+    # ----------------------------------------
+    # Zone อันตราย (ล้างข้อมูล)
+    # ----------------------------------------
+    st.divider()
+    with st.expander("⚠️ พื้นที่อันตราย (ล้างข้อมูล)"):
+        st.warning("การกระทำนี้จะลบข้อมูลทั้งหมดและกู้คืนยาก")
+        confirm_delete = st.checkbox("ฉันยืนยันที่จะลบข้อมูลทั้งหมด")
         
-    ev_home_rate = new_ev_rate
+        if confirm_delete:
+            if st.button("ยืนยันการล้างข้อมูล 🗑️", type="primary", use_container_width=True):
+                st.session_state.data = st.session_state.data.iloc[0:0] 
+                save_data(st.session_state.data)
+                st.success("ล้างข้อมูลเรียบร้อยแล้ว")
+                st.rerun()
 
 # --- 5. MAIN APP ---
 st.title("🚗 ระบบบันทึกรายได้")
@@ -531,6 +559,7 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
 
