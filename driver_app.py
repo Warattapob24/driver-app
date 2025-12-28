@@ -382,7 +382,7 @@ with tab1:
                         save_data(st.session_state.data)
                         st.rerun()
     st.markdown("<br>" * 5, unsafe_allow_html=True)
-                    
+    
 # ==========================================
 # TAB 2: สรุปผล (Solution: ย้ายตัวเลือกไป Sidebar แก้ปัญหาหน้าเด้ง)
 # ==========================================
@@ -601,6 +601,7 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
 
