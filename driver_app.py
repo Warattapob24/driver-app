@@ -183,51 +183,70 @@ st.title("🚗 ระบบบันทึกรายได้")
 tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล"])
 
 # ==========================================
-# TAB 1: บันทึกงาน (Smart Shift & Auto Odometer)
+# TAB 1: บันทึกงาน (Modern UI: กะทัดรัด + มีแถบพลัง)
 # ==========================================
 with tab1:
-    # --- ฟังก์ชันช่วยดึงเลขไมล์ล่าสุด ---
+    # --- ฟังก์ชันช่วย (เหมือนเดิม) ---
     def get_last_odom():
         df = st.session_state.data
         if not df.empty:
-            # หาค่าเลขไมล์ที่มากที่สุดที่เคยบันทึกไว้ (สมมติว่าเลขไมล์เพิ่มขึ้นเสมอ)
             max_odom = df['เลขไมล์'].max()
             return float(max_odom) if max_odom > 0 else 0.0
         return 0.0
 
-    # --- ฟังก์ชันเช็คสถานะงานล่าสุด (เริ่ม หรือ เลิก) ---
     def get_work_status():
         df = st.session_state.data
         if not df.empty:
-            # ดูรายการล่าสุดในหมวด "กะงาน"
             shift_df = df[df['หมวดหมู่'] == 'กะงาน']
             if not shift_df.empty:
-                last_action = shift_df.iloc[-1]['รายการ'] # รายการสุดท้าย
-                return last_action # "☀️ เริ่มงาน" หรือ "🌙 เลิกงาน"
-        return "🌙 เลิกงาน" # Default
+                return shift_df.iloc[-1]['รายการ']
+        return "🌙 เลิกงาน"
 
-    # --- ส่วนจัดการกะงาน (Smart Section) ---
+    # --- ส่วนที่ 1: แถบพลัง (Progress Bar) บนสุด ---
+    # คำนวณยอดวันนี้ก่อน
+    today = get_thai_date()
+    df = st.session_state.data
+    
+    today_income = 0.0
+    if not df.empty:
+        # กรองเฉพาะวันนี้ และ เป็นรายรับ
+        today_df = df[(df['วันที่'] == today) & (df['หมวดหมู่'] == 'รายรับ')]
+        today_income = today_df['คงเหลือ/สุทธิ'].sum()
+    
+    # ดึงเป้าหมายจาก Settings (ถ้าไม่มีใช้ค่า Default)
+    current_settings = load_settings()
+    target = float(current_settings.get("target_income", 2000.0))
+    
+    # แสดงผลแถบพลัง (Compact Design)
+    progress = min(today_income / target, 1.0) if target > 0 else 0
+    
+    # จัด layout ให้ progress bar อยู่คู่กับตัวเลข
+    c_prog_1, c_prog_2 = st.columns([3, 1])
+    with c_prog_1:
+        st.progress(progress, text=f"🎯 เป้าหมายวันนี้: {progress*100:.0f}%")
+    with c_prog_2:
+        st.caption(f"ยอด: {today_income:,.0f} / {target:,.0f}")
+
+    st.divider() # เส้นคั่นบางๆ
+
+    # --- ส่วนที่ 2: จัดการกะงาน (Slim Design) ---
     current_status = get_work_status()
     last_odom_val = get_last_odom()
 
-    st.markdown("### ⏱️ จัดการเวลาและเลขไมล์")
-    
-    # สร้างกล่องสถานะ
-    status_container = st.container(border=True)
+    # ใช้ st.expander เพื่อซ่อนรายละเอียดถ้าไม่อยากเห็น (แต่ Default คือเปิด)
+    # หรือใช้ layout แบบบรรทัดเดียว
     
     if "เริ่ม" in current_status:
-        # กรณี: กำลังวิ่งงานอยู่ -> โชว์ปุ่มเลิกงาน
-        status_container.success(f"🟢 สถานะ: กำลังวิ่งงาน (เริ่มไว้ที่ {last_odom_val:,.0f} กม.)")
-        c_shift_1, c_shift_2 = status_container.columns([3, 1])
-        with c_shift_1:
-            # ช่องกรอกเลขไมล์เลิกงาน (ว่างไว้ให้กรอก แต่มี Hint)
-            end_odom = st.number_input("🏁 เลขไมล์จบกะ (ต้องมากกว่าเริ่ม)", min_value=last_odom_val, value=None, placeholder=f"มากกว่า {last_odom_val:.0f}")
-        with c_shift_2:
-            st.write("") # ดันปุ่มลง
-            st.write("")
-            if st.button("🌙 กดเลิกงาน", type="primary", use_container_width=True):
+        # === กรณี: กำลังวิ่งงาน (สีเขียว) ===
+        st.markdown(f"🟢 **สถานะ: วิ่งงานอยู่** (เริ่มไว้ที่ {last_odom_val:,.0f} กม.)")
+        
+        # จัดปุ่มและช่องกรอกให้อยู่แถวเดียวกัน (Compact)
+        c_end_1, c_end_2 = st.columns([2, 1]) 
+        with c_end_1:
+            end_odom = st.number_input("เลขไมล์จบ", min_value=last_odom_val, value=None, placeholder="กรอกเลขไมล์จบ", label_visibility="collapsed")
+        with c_end_2:
+            if st.button("🌙 จบกะ", type="primary", use_container_width=True):
                 if end_odom and end_odom >= last_odom_val:
-                    # บันทึกเลิกงาน
                     new_row = {
                         'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                         'แอป': 'ระบบ', 'หมวดหมู่': 'กะงาน', 'รายการ': '🌙 เลิกงาน', 'ช่องทางรับเงิน': '-',
@@ -238,20 +257,18 @@ with tab1:
                     save_data(st.session_state.data)
                     st.rerun()
                 else:
-                    st.error("กรุณากรอกเลขไมล์ที่ถูกต้อง")
-                    
+                    st.toast("⚠️ เลขไมล์ต้องมากกว่าตอนเริ่ม")
     else:
-        # กรณี: พักผ่อนอยู่ -> โชว์ปุ่มเริ่มงาน (พร้อมเลขไมล์ Auto)
-        status_container.info(f"🔴 สถานะ: พักผ่อน (จบกะล่าสุด {last_odom_val:,.0f} กม.)")
-        c_shift_1, c_shift_2 = status_container.columns([3, 1])
-        with c_shift_1:
-            # 🟢 AUTO FILL: เอาเลขไมล์ล่าสุดมาใส่รอเลย!
-            start_odom = st.number_input("☀️ เลขไมล์เริ่มกะ", min_value=0.0, value=last_odom_val, step=1.0)
-        with c_shift_2:
-            st.write("")
-            st.write("")
-            if st.button("🚀 กดเริ่มงาน", type="primary", use_container_width=True):
-                # บันทึกเริ่มงาน
+        # === กรณี: พักผ่อน (สีแดง/เทา) ===
+        st.markdown(f"🔴 **สถานะ: พักผ่อน** (ล่าสุด {last_odom_val:,.0f} กม.)")
+        
+        # จัดปุ่มและช่องกรอกให้อยู่แถวเดียวกัน
+        c_start_1, c_start_2 = st.columns([2, 1])
+        with c_start_1:
+            # Auto Fill เลขไมล์ล่าสุดให้เลย
+            start_odom = st.number_input("เลขไมล์เริ่ม", min_value=0.0, value=last_odom_val, step=1.0, label_visibility="collapsed")
+        with c_start_2:
+            if st.button("🚀 เริ่มงาน", type="primary", use_container_width=True):
                 new_row = {
                     'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                     'แอป': 'ระบบ', 'หมวดหมู่': 'กะงาน', 'รายการ': '☀️ เริ่มงาน', 'ช่องทางรับเงิน': '-',
@@ -262,126 +279,84 @@ with tab1:
                 save_data(st.session_state.data)
                 st.rerun()
 
-    st.divider()
+    # --- ส่วนที่ 3: แบบฟอร์มบันทึก (เหมือนเดิมแต่ตัดส่วนเกิน) ---
+    st.markdown("### 📝 บันทึกรายการ")
+    
+    # ใช้ Tabs ย่อยแทน Radio Button เพื่อประหยัดที่แนวตั้ง
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["🚗 รับงาน", "⛽ เติมของ", "💳 เติมแอป", "🛠️ จ่ายอื่น"])
+    
+    # 1. รับงาน
+    with sub_tab1:
+        with st.form(key="form_income", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1: platform = st.selectbox("แอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"], label_visibility="collapsed")
+            with c2: pay_method = st.selectbox("การรับเงิน", ["💵 เงินสด/โอน", "💳 ตัดบัตร/แอป"], label_visibility="collapsed")
 
-    # --- ส่วนบันทึกรายการปกติ (ตัดส่วนเริ่ม/เลิกงานออก เพราะย้ายไปข้างบนแล้ว) ---
-    col_type, col_form = st.columns([1, 2])
-    with col_type:
-        st.subheader("เลือกรายการ")
-        # 🟢 ลบตัวเลือก "เริ่มงาน/เลิกงาน" ออกจากตรงนี้ เพื่อไม่ให้ซ้ำซ้อน
-        entry_type = st.radio(
-            "ประเภทรายการ",
-            ["🚗 รับงานขับรถ", "⛽ เติมน้ำมัน/ชาร์จไฟ", "💳 เติมเครดิตแอป", "🛠️ จ่ายอื่นๆ"],
-        )
-
-    with col_form:
-        st.container(border=True)
-        
-        # 1. รับงาน
-        if entry_type == "🚗 รับงานขับรถ":
-            st.markdown("#### 📝 บันทึกรายได้")
-            with st.form(key="form_income", clear_on_submit=True):
-                c_app, c_pay = st.columns(2)
-                with c_app:
-                    platform = st.selectbox("เลือกแอป", ["Grab", "Bolt", "Line Man", "Maxim", "Robinhood", "Win", "งานนอก"])
-                with c_pay:
-                    pay_method = st.selectbox("ช่องทางรับเงิน", ["💵 เงินสด/โอน", "💳 ตัดบัตร/แอป"])
-
-                c1, c2 = st.columns(2)
-                with c1: 
-                    app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, step=10.0, value=None, placeholder="0")
-                with c2: 
-                    real_receive = st.number_input("เงินที่รับจริง (รวมทิป)", min_value=0.0, step=10.0, value=None, placeholder="0")
+            c3, c4 = st.columns(2)
+            with c3: app_price = st.number_input("ราคาหน้าแอป", min_value=0.0, value=None, placeholder="0")
+            with c4: real_receive = st.number_input("รับจริง (รวมทิป)", min_value=0.0, value=None, placeholder="0")
+            
+            note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ (ถ้ามี)")
+            
+            if st.form_submit_button("✅ บันทึกรายได้", type="primary", use_container_width=True):
+                price_val = app_price if app_price is not None else 0.0
+                real_val = real_receive if real_receive is not None else 0.0
                 
-                note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
-                submitted = st.form_submit_button("บันทึกรายได้ ✅", type="primary", use_container_width=True)
-                
-                if submitted:
-                    price_val = app_price if app_price is not None else 0.0
-                    real_val = real_receive if real_receive is not None else 0.0
+                if price_val > 0 or real_val > 0:
+                    if real_val == 0 and price_val > 0: real_val = price_val 
+                    tip = max(0, real_val - price_val)
+                    cash_in_hand = real_val if pay_method == "💵 เงินสด/โอน" else 0.0
                     
-                    if price_val > 0 or real_val > 0:
-                        if real_val == 0 and price_val > 0: real_val = price_val 
-                        tip = max(0, real_val - price_val)
-                        cash_in_hand = real_val if pay_method == "💵 เงินสด/โอน" else 0.0
-                        
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': platform, 'หมวดหมู่': 'รายรับ', 'รายการ': 'ค่าโดยสาร', 'ช่องทางรับเงิน': pay_method,
-                            'ยอดเต็ม/หน้าแอป': price_val, 'หัก/จ่าย': 0, 'ทิป': tip, 
-                            'คงเหลือ/สุทธิ': real_val, 'เงินสดเข้าตัว': cash_in_hand, 
-                            'เลขไมล์': 0, 'หมายเหตุ': note
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.toast(f"บันทึกรายได้ {real_val:.0f} บาท")
-                        st.rerun()
-                    else: st.warning("กรุณากรอกยอดเงิน")
+                    new_row = {
+                        'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
+                        'แอป': platform, 'หมวดหมู่': 'รายรับ', 'รายการ': 'ค่าโดยสาร', 'ช่องทางรับเงิน': pay_method,
+                        'ยอดเต็ม/หน้าแอป': price_val, 'หัก/จ่าย': 0, 'ทิป': tip, 
+                        'คงเหลือ/สุทธิ': real_val, 'เงินสดเข้าตัว': cash_in_hand, 
+                        'เลขไมล์': 0, 'หมายเหตุ': note
+                    }
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.toast(f"บันทึก +{real_val:.0f} บาท")
+                    st.rerun()
+                else: st.warning("ใส่นะยอดเงินก่อนนะ")
 
-        # 2. เติมเครดิต
-        elif entry_type == "💳 เติมเครดิตแอป":
-            st.markdown("#### 💳 เติมเงินเข้าแอป")
-            with st.form(key="form_topup", clear_on_submit=True):
-                sub_cat = st.selectbox("แอปไหน", ["Grab Wallet", "Bolt", "Maxim", "Line Man", "Robinhood"])
-                cost = st.number_input("จำนวนเงินที่เติม", min_value=0.0, value=None, placeholder="0")
-                submitted = st.form_submit_button("บันทึกรายจ่าย 💾", type="primary", use_container_width=True)
-                
-                if submitted:
-                    cost_val = cost if cost is not None else 0.0
-                    if cost_val > 0:
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': sub_cat, 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'เติมเครดิต', 'ช่องทางรับเงิน': 'จ่ายสด',
-                            'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost_val, 'ทิป': 0, 
-                            'คงเหลือ/สุทธิ': -cost_val, 'เงินสดเข้าตัว': -cost_val, 'เลขไมล์': 0, 'หมายเหตุ': 'Top-up'
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.toast("บันทึกแล้ว")
-                        st.rerun()
+    # 2. เติมพลังงาน
+    with sub_tab2:
+        with st.form(key="form_energy", clear_on_submit=True):
+            e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
+            default_val = float(ev_home_rate) if e_type == "⚡ ชาร์จบ้าน (เหมา)" else None
+            cost = st.number_input("จำนวนเงิน", min_value=0.0, value=default_val, placeholder="0")
+            note = st.text_input("สถานที่")
+            if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
+                if cost:
+                    new_row = {'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"), 'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ค่าน้ำมัน/ไฟ', 'ช่องทางรับเงิน': 'จ่ายสด', 'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 'หมายเหตุ': f"{e_type} - {note}"}
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.rerun()
 
-        # 3. พลังงาน
-        elif entry_type == "⛽ เติมน้ำมัน/ชาร์จไฟ":
-            st.markdown("#### ⚡ ต้นทุนพลังงาน")
-            with st.form(key="form_energy", clear_on_submit=True):
-                e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
-                default_val = float(ev_home_rate) if e_type == "⚡ ชาร์จบ้าน (เหมา)" else None
-                cost = st.number_input("จำนวนเงิน", min_value=0.0, value=default_val, placeholder="0")
-                note = st.text_input("สถานที่")
-                submitted = st.form_submit_button("บันทึก 💾", type="primary", use_container_width=True)
-                if submitted:
-                    cost_val = cost if cost is not None else 0.0
-                    if cost_val > 0:
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ค่าน้ำมัน/ไฟ', 'ช่องทางรับเงิน': 'จ่ายสด',
-                            'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost_val, 'ทิป': 0, 
-                            'คงเหลือ/สุทธิ': -cost_val, 'เงินสดเข้าตัว': -cost_val, 'เลขไมล์': 0, 'หมายเหตุ': f"{e_type} - {note}"
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.rerun()
+    # 3. เติมเครดิต
+    with sub_tab3:
+        with st.form(key="form_topup", clear_on_submit=True):
+            sub_cat = st.selectbox("แอป", ["Grab Wallet", "Bolt", "Maxim", "Line Man", "Robinhood"])
+            cost = st.number_input("จำนวนเงิน", min_value=0.0, value=None, placeholder="0")
+            if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
+                if cost:
+                    new_row = {'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"), 'แอป': sub_cat, 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'เติมเครดิต', 'ช่องทางรับเงิน': 'จ่ายสด', 'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 'หมายเหตุ': 'Top-up'}
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.rerun()
 
-        # 4. จ่ายอื่น
-        elif entry_type == "🛠️ จ่ายอื่นๆ":
-            st.markdown(f"#### 🛠️ จ่ายทั่วไป")
-            with st.form(key="form_other", clear_on_submit=True):
-                sub_cat = st.text_input("รายการ (เช่น ข้าว, ปะยาง)")
-                cost = st.number_input("จำนวนเงิน", min_value=0.0, value=None, placeholder="0")
-                submitted = st.form_submit_button("บันทึก 💾", type="primary", use_container_width=True)
-                if submitted:
-                    cost_val = cost if cost is not None else 0.0
-                    if cost_val > 0:
-                        new_row = {
-                            'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
-                            'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ทั่วไป', 'ช่องทางรับเงิน': 'จ่ายสด',
-                            'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost_val, 'ทิป': 0, 
-                            'คงเหลือ/สุทธิ': -cost_val, 'เงินสดเข้าตัว': -cost_val, 'เลขไมล์': 0, 'หมายเหตุ': sub_cat
-                        }
-                        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
-                        save_data(st.session_state.data)
-                        st.rerun()
-    st.markdown("<br>" * 5, unsafe_allow_html=True)
+    # 4. จ่ายอื่น
+    with sub_tab4:
+        with st.form(key="form_other", clear_on_submit=True):
+            sub_cat = st.text_input("รายการ (เช่น ข้าว, ปะยาง)")
+            cost = st.number_input("จำนวนเงิน", min_value=0.0, value=None, placeholder="0")
+            if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
+                if cost:
+                    new_row = {'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"), 'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'ทั่วไป', 'ช่องทางรับเงิน': 'จ่ายสด', 'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 'หมายเหตุ': sub_cat}
+                    st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
+                    save_data(st.session_state.data)
+                    st.rerun()
     
 # ==========================================
 # TAB 2: สรุปผล (Solution: ย้ายตัวเลือกไป Sidebar แก้ปัญหาหน้าเด้ง)
@@ -601,6 +576,7 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
 
 
