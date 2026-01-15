@@ -2,14 +2,28 @@ import streamlit as st
 import pandas as pd
 import datetime
 import plotly.express as px
-import plotly.graph_objects as go
+import json
+import os
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="ระบบบันทึกรายได้คนขับ", page_icon="🚗", layout="wide")
-SHEET_NAME = "Drivers"
+SETTINGS_FILE = "settings.json"
+SHEET_NAME = "Drivers" 
 
-# --- HELPER: TIMEZONE ---
+# --- FORMATTING HELPER (ฟังก์ชันจัดรูปแบบตัวเลขตามสั่ง) ---
+def fmt_num(val):
+    """
+    แปลงตัวเลขเป็นข้อความ:
+    - ถ้าเป็นจำนวนเต็ม (เช่น 100.00) -> แสดง "100" (ไม่มีทศนิยม)
+    - ถ้ามีเศษ (เช่น 100.50) -> แสดง "100.50" (แสดงทศนิยม)
+    """
+    if val is None: return "0"
+    if float(val).is_integer():
+        return f"{int(val):,}"
+    return f"{float(val):,.2f}".rstrip('0').rstrip('.')
+
+# --- TIMEZONE ---
 def get_thai_time():
     tz_thai = datetime.timezone(datetime.timedelta(hours=7))
     return datetime.datetime.now(tz_thai)
@@ -17,20 +31,10 @@ def get_thai_time():
 def get_thai_date():
     return get_thai_time().date()
 
-# --- HELPER: FORMAT NUMBER (โจทย์ข้อ 3: ตัดทศนิยม) ---
-def fmt_num(val):
-    """แปลงตัวเลขเป็น string: ถ้าลงตัวไม่มีทศนิยม ถ้ามีเศษแสดง 2 ตำแหน่ง"""
-    if pd.isna(val): return "0"
-    val = float(val)
-    if val.is_integer():
-        return f"{val:,.0f}"
-    else:
-        return f"{val:,.2f}"
-
-# --- 2. SETTINGS (CLOUD) ---
+# --- 2. SETTINGS ---
 def load_settings():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    default_settings = {"ev_rate": 50.0, "target_income": 2000.0}
+    default_settings = {"ev_rate": 50.0, "target_income": 2000.0} 
     try:
         df = conn.read(worksheet="Settings", ttl=0)
         if not df.empty and 'Key' in df.columns and 'Value' in df.columns:
@@ -48,12 +52,13 @@ def save_settings(settings):
         conn.update(worksheet="Settings", data=df)
     except Exception as e:
         st.error(f"บันทึกค่าตั้งต้นไม่สำเร็จ: {e}")
-
+        
 # --- 3. DATA LOADING ---
 def load_and_clean_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
         df = conn.read(worksheet=SHEET_NAME, ttl=0)
+        
         required_cols = [
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
             'ยอดเต็ม/หน้าแอป', 'หัก/จ่าย', 'ทิป', 'คงเหลือ/สุทธิ', 
@@ -68,8 +73,10 @@ def load_and_clean_data():
             'Category': 'หมวดหมู่', 'SubCategory': 'รายการ',
             'Amount_Gross': 'ยอดเต็ม/หน้าแอป', 'Deduction': 'หัก/จ่าย',
             'Tip': 'ทิป', 'Net_Income': 'คงเหลือ/สุทธิ',
-            'Note': 'หมายเหตุ', 'Odometer': 'เลขไมล์',
-            'Payment_Method': 'ช่องทางรับเงิน', 'Cash_In': 'เงินสดเข้าตัว'
+            'Distance_Km': 'ระยะทาง(กม.)', 'Note': 'หมายเหตุ',
+            'Odometer': 'เลขไมล์',
+            'Payment_Method': 'ช่องทางรับเงิน',
+            'Cash_In': 'เงินสดเข้าตัว'
         }
         df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
         
@@ -100,6 +107,7 @@ def save_data(df):
         df_save = df.copy()
         if 'วันที่' in df_save.columns:
             df_save['วันที่'] = df_save['วันที่'].astype(str)
+            
         conn.update(worksheet=SHEET_NAME, data=df_save)
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
@@ -124,6 +132,7 @@ with st.sidebar:
     
     st.divider()
     st.markdown("### 🎯 เป้าหมายรายวัน")
+    
     saved_target = float(current_settings.get("target_income", 2000.0))
     new_target = st.number_input("ตั้งเป้ารายได้ (บาท)", value=saved_target, step=100.0)
     
@@ -133,8 +142,10 @@ with st.sidebar:
     if new_ev_rate != saved_rate or new_target != saved_target:
         current_settings["ev_rate"] = new_ev_rate
         current_settings["target_income"] = new_target
+        
         save_settings(current_settings)
         st.toast(f"บันทึกการตั้งค่าลง Cloud แล้ว! ☁️")
+        
         import time
         time.sleep(1)
         st.rerun()
@@ -143,6 +154,7 @@ with st.sidebar:
     with st.expander("⚠️ พื้นที่อันตราย (ล้างข้อมูล)"):
         st.warning("การกระทำนี้จะลบข้อมูลทั้งหมดและกู้คืนยาก")
         confirm_delete = st.checkbox("ฉันยืนยันที่จะลบข้อมูลทั้งหมด")
+        
         if confirm_delete:
             if st.button("ยืนยันการล้างข้อมูล 🗑️", type="primary", use_container_width=True):
                 st.session_state.data = st.session_state.data.iloc[0:0] 
@@ -182,15 +194,14 @@ with tab1:
         today_df = df[(df['วันที่'] == today) & (df['หมวดหมู่'] == 'รายรับ')]
         today_income = today_df['คงเหลือ/สุทธิ'].sum()
     
-    target = target_income
-    progress = min(today_income / target, 1.0) if target > 0 else 0
+    progress = min(today_income / target_income, 1.0) if target_income > 0 else 0
     
     c_prog_1, c_prog_2 = st.columns([3, 1])
     with c_prog_1:
         st.progress(progress, text=f"🎯 เป้าหมาย: {progress*100:.0f}%")
     with c_prog_2:
-        # ใช้ fmt_num ตัดทศนิยม
-        st.caption(f"💰 {fmt_num(today_income)} / {fmt_num(target)}")
+        # ใช้ fmt_num จัดรูปแบบตัวเลข
+        st.caption(f"💰 {fmt_num(today_income)} / {fmt_num(target_income)}")
 
     st.divider()
 
@@ -262,16 +273,7 @@ with tab1:
                 
                 if price_val > 0 or real_val > 0:
                     if real_val == 0 and price_val > 0: real_val = price_val 
-                    
-                    # คำนวณทิปและอื่นๆ
-                    # กรณีรับเงินสด: real_val คือเงินที่ลูกค้าให้
-                    # กรณีตัดบัตร: real_val คือเงินที่เข้า Wallet สุทธิ
-                    
-                    tip = 0.0
-                    # ถ้าได้เงินจริงมากกว่าหน้าแอป ให้ถือส่วนต่างเป็นทิป
-                    if real_val > price_val:
-                        tip = real_val - price_val
-                    
+                    tip = max(0, real_val - price_val)
                     cash_in_hand = real_val if pay_method == "💵 เงินสด/โอน" else 0.0
                     
                     new_row = {
@@ -298,10 +300,11 @@ with tab1:
             if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
                 if cost:
                     full_note = f"{e_type} - {note}" if note else e_type
+                    
                     new_row = {
                         'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                         'แอป': 'ค่าใช้จ่าย', 'หมวดหมู่': 'รายจ่าย', 
-                        'รายการ': 'ค่าน้ำมัน/ไฟ',
+                        'รายการ': 'ค่าน้ำมัน/ไฟ', 
                         'ช่องทางรับเงิน': 'จ่ายสด', 
                         'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 
                         'หมายเหตุ': full_note
@@ -335,15 +338,14 @@ with tab1:
                     st.rerun()
 
 # ==========================================
-# TAB 2: สรุปผล (เพิ่มฟีเจอร์ใหม่)
+# TAB 2: สรุปผล
 # ==========================================
 import calendar
 
 with tab2:
-    # --- Filter UI ---
     with st.sidebar:
         st.divider()
-        st.markdown("### 📊 ตัวเลือกแสดงผล")
+        st.markdown("### 📊 ตัวเลือกแสดงผล (Tab 2)")
         time_filter = st.selectbox("📅 ช่วงเวลา:", ["วันนี้", "เมื่อวาน", "สัปดาห์นี้", "เดือนนี้", "เดือนที่แล้ว", "ปีนี้", "กำหนดเอง"], key="sb_time_filter")
         
         custom_start, custom_end = None, None
@@ -351,6 +353,8 @@ with tab2:
             dr = st.date_input("เลือกวันที่:", value=(get_thai_date(), get_thai_date()), key="sb_date_picker")
             if len(dr) == 2: custom_start, custom_end = dr
 
+    st.markdown(f"### 📊 แดชบอร์ด: {time_filter}")
+    
     df = st.session_state.data
     if not df.empty:
         today = get_thai_date()
@@ -380,11 +384,6 @@ with tab2:
             f_df = df[(df['วันที่'] >= custom_start) & (df['วันที่'] <= custom_end)]
             days_count = (custom_end - custom_start).days + 1
 
-        # =======================
-        # PART 1: รายงานตามช่วงเวลาที่เลือก
-        # =======================
-        st.markdown(f"### 📊 สรุปผล: {time_filter}")
-        
         if not f_df.empty:
             inc_df = f_df[f_df['หมวดหมู่'] == 'รายรับ']
             exp_df = f_df[f_df['หมวดหมู่'] == 'รายจ่าย']
@@ -394,7 +393,7 @@ with tab2:
             net = total_inc - total_exp
             cash = f_df['เงินสดเข้าตัว'].sum()
             
-            # คำนวณ Metrics อื่นๆ
+            # --- Metrics Calculation ---
             odom_df = f_df[f_df['เลขไมล์'] > 0]
             dist = 0
             if not odom_df.empty:
@@ -417,7 +416,6 @@ with tab2:
                             hours += h
                         except: pass
             
-            if 'target_income' not in locals(): target_income = 2000
             total_target = target_income * days_count
             
             # --- Display Targets ---
@@ -425,7 +423,7 @@ with tab2:
             progress = min(total_inc / total_target, 1.0) if total_target > 0 else 0
             st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}%")
 
-            # --- Display Metrics (ใช้ fmt_num ตัดทศนิยม) ---
+            # --- Display Metrics (ใช้ fmt_num ทุกจุด) ---
             st.markdown("#### 💎 ประสิทธิภาพ & การเงิน")
             
             baht_per_km = net / dist if dist > 0 else 0
@@ -445,105 +443,131 @@ with tab2:
             
             st.divider()
 
-        else:
-            st.warning(f"🔍 ไม่พบข้อมูล ({time_filter})")
-        
-        # =======================
-        # PART 2: (โจทย์ข้อ 1) ประวัติสถิติระยะยาว (ไม่ลบตาม Filter)
-        # =======================
-        st.markdown("### 📈 ประวัติและแนวโน้ม (ข้อมูลทั้งหมด)")
-        st.caption("ส่วนนี้จะแสดงข้อมูลทั้งหมดที่มีในระบบ เพื่อดูพัฒนาการระยะยาว")
-        
-        all_inc = df[df['หมวดหมู่'] == 'รายรับ']
-        if not all_inc.empty:
-            # 2.1 กราฟแนวโน้มรายได้รวมรายเดือน
-            all_inc['DateObj'] = pd.to_datetime(all_inc['วันที่'])
-            all_inc['MonthYear'] = all_inc['DateObj'].dt.strftime('%Y-%m')
-            
-            monthly_stats = all_inc.groupby('MonthYear')['คงเหลือ/สุทธิ'].sum().reset_index()
-            
-            fig_hist = px.bar(monthly_stats, x='MonthYear', y='คงเหลือ/สุทธิ', 
-                              title="📅 รายได้รวมรายเดือน (History)", 
-                              text_auto='.2s', color_discrete_sequence=['#8E44AD'])
-            st.plotly_chart(fig_hist, use_container_width=True)
-            
-            # =======================
-            # PART 3: (โจทย์ข้อ 2) วิเคราะห์ความคุ้มค่าแอป (GP Analysis)
-            # =======================
-            st.divider()
-            st.markdown("### 🏆 ความคุ้มค่าแต่ละแอป (GP Analysis)")
-            st.caption("คำนวณจาก: (ราคาหน้าแอป - รายได้สุทธิไม่รวมทิป) / ราคาหน้าแอป")
-            
-            # เตรียมข้อมูลสำหรับคำนวณ GP
-            app_stats = []
-            grouped_app = all_inc.groupby('แอป')
-            
-            for app_name, data in grouped_app:
-                count = len(data)
-                sum_app_price = data['ยอดเต็ม/หน้าแอป'].sum()
-                sum_net = data['คงเหลือ/สุทธิ'].sum()
-                sum_tip = data['ทิป'].sum()
-                
-                # รายได้สุทธิเนื้อๆ (ไม่รวมทิป)
-                net_no_tip = sum_net - sum_tip
-                
-                # คำนวณ GP (ส่วนต่างที่หายไป)
-                # GP Amount = Price - Net_No_Tip
-                gp_amt = sum_app_price - net_no_tip
-                
-                # ป้องกันหารด้วยศูนย์
-                if sum_app_price > 0:
-                    gp_percent = (gp_amt / sum_app_price) * 100
+            # --- 🟢 วิเคราะห์ความคุ้มค่า (GP Analysis) - ใหม่! ---
+            with st.expander("💸 วิเคราะห์ความคุ้มค่า (GP & ค่าคอม)", expanded=True):
+                if not inc_df.empty:
+                    # คำนวณ GP
+                    gp_data = []
+                    for app in inc_df['แอป'].unique():
+                        app_df = inc_df[inc_df['แอป'] == app]
+                        total_gross = app_df['ยอดเต็ม/หน้าแอป'].sum()
+                        total_net = app_df['คงเหลือ/สุทธิ'].sum()
+                        total_tip = app_df['ทิป'].sum()
+                        
+                        # รายได้จากการวิ่งจริง (ไม่รวมทิป) = สุทธิ - ทิป
+                        real_fare = total_net - total_tip
+                        
+                        if total_gross > 0:
+                            # GP = ราคาหน้าแอป - รายได้จริง (ไม่รวมทิป)
+                            gp_amount = total_gross - real_fare
+                            gp_pct = (gp_amount / total_gross) * 100
+                            
+                            gp_data.append({
+                                "แอป": app,
+                                "GP (%)": gp_pct,
+                                "โดนหัก (บาท)": gp_amount,
+                                "หน้าแอป (บาท)": total_gross,
+                                "เข้ากระเป๋า (บาท)": total_net
+                            })
+                    
+                    if gp_data:
+                        gp_df = pd.DataFrame(gp_data).sort_values(by="GP (%)", ascending=True)
+                        
+                        col_gp1, col_gp2 = st.columns([1, 2])
+                        with col_gp1:
+                            st.dataframe(
+                                gp_df, 
+                                column_config={
+                                    "GP (%)": st.column_config.NumberColumn(format="%.1f %%"),
+                                    "โดนหัก (บาท)": st.column_config.NumberColumn(format="%.0f"),
+                                    "หน้าแอป (บาท)": st.column_config.NumberColumn(format="%.0f"),
+                                    "เข้ากระเป๋า (บาท)": st.column_config.NumberColumn(format="%.0f"),
+                                },
+                                hide_index=True,
+                                use_container_width=True
+                            )
+                        with col_gp2:
+                             # กราฟเปรียบเทียบ GP
+                            fig_gp = px.bar(
+                                gp_df, 
+                                x='GP (%)', 
+                                y='แอป', 
+                                orientation='h', 
+                                title="📉 เปรียบเทียบ % การหักค่าคอมฯ (ยิ่งน้อยยิ่งคุ้ม)",
+                                text_auto='.1f',
+                                color='GP (%)',
+                                color_continuous_scale='Reds'
+                            )
+                            st.plotly_chart(fig_gp, use_container_width=True)
+                    else:
+                        st.info("ยังไม่มีข้อมูลราคาหน้าแอปให้คำนวณ GP (กรุณากรอกช่อง 'ราคาหน้าแอป' ตอนบันทึก)")
                 else:
-                    gp_percent = 0.0
-                
-                # ถ้า GP ติดลบ (เช่นได้โปรโมชั่น หรืออินเซนทีฟทับ) ให้ปัดเป็น 0 หรือแสดงตามจริง
-                # ในที่นี้แสดงตามจริงแต่เน้นว่าเป็นค่าประมาณ
-                
-                app_stats.append({
-                    "แอป": app_name,
-                    "จำนวนงาน": count,
-                    "ยอดหน้าแอป": sum_app_price,
-                    "รายได้สุทธิ": sum_net,
-                    "โดนหัก(ประมาณ)": gp_amt,
-                    "% GP เฉลี่ย": gp_percent
-                })
-            
-            if app_stats:
-                stat_df = pd.DataFrame(app_stats)
-                # Sort ตามจำนวนงาน
-                stat_df = stat_df.sort_values(by="จำนวนงาน", ascending=False)
-                
-                # Format Dataframe แสดงผลสวยๆ
-                st.dataframe(
-                    stat_df,
-                    column_config={
-                        "แอป": st.column_config.TextColumn("Platform"),
-                        "จำนวนงาน": st.column_config.NumberColumn("Jobs", format="%d"),
-                        "ยอดหน้าแอป": st.column_config.NumberColumn("Total Price", format="%.0f ฿"),
-                        "รายได้สุทธิ": st.column_config.NumberColumn("Net Income", format="%.0f ฿"),
-                        "โดนหัก(ประมาณ)": st.column_config.NumberColumn("Deducted", format="%.0f ฿"),
-                        "% GP เฉลี่ย": st.column_config.ProgressColumn(
-                            "GP %", 
-                            format="%.1f%%", 
-                            min_value=0, 
-                            max_value=100,
-                            help="เปอร์เซ็นต์ส่วนต่างระหว่างราคาหน้าแอปกับเงินที่ได้จริง (ไม่รวมทิป)"
-                        ),
-                    },
-                    hide_index=True,
-                    use_container_width=True
-                )
-                
-                # กราฟเปรียบเทียบ GP
-                fig_gp = px.bar(stat_df, x='แอป', y='% GP เฉลี่ย', 
-                                title="📊 เปรียบเทียบ % การหักเงิน (GP)",
-                                text_auto='.1f', color='% GP เฉลี่ย', color_continuous_scale='Reds')
-                st.plotly_chart(fig_gp, use_container_width=True)
-            
-        else:
-            st.info("ยังไม่มีข้อมูลรายรับสำหรับวิเคราะห์สถิติ")
+                    st.info("ไม่มีข้อมูลรายรับสำหรับคำนวณ")
 
+            st.divider()
+
+            # --- 📊 กราฟทั่วไป ---
+            APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
+
+            col_g1, col_g2 = st.columns([2, 1])
+            with col_g1:
+                if not inc_df.empty:
+                    daily = inc_df.groupby('วันที่')['คงเหลือ/สุทธิ'].sum().reset_index()
+                    st.plotly_chart(px.area(daily, x='วันที่', y='คงเหลือ/สุทธิ', title="📈 เส้นทางรายได้", markers=True, color_discrete_sequence=['#2E86C1']), use_container_width=True)
+                else: st.info("รอข้อมูลรายได้...")
+
+            with col_g2:
+                if not inc_df.empty:
+                    fig = px.pie(inc_df, values='คงเหลือ/สุทธิ', names='แอป', title="🍩 สัดส่วนแอป", hole=0.4, color='แอป', color_discrete_map=APP_COLORS)
+                    fig.update_layout(showlegend=False, margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig, use_container_width=True)
+
+            col_g3, col_g4 = st.columns(2)
+            with col_g3:
+                if not inc_df.empty:
+                    temp = inc_df.copy()
+                    temp['Hour'] = pd.to_datetime(temp['เวลา'], format='%H:%M').dt.hour
+                    hm = temp.pivot_table(index='แอป', columns='Hour', values='คงเหลือ/สุทธิ', aggfunc='sum', fill_value=0)
+                    if not hm.empty:
+                        fig_hm = px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens")
+                        st.plotly_chart(fig_hm, use_container_width=True)
+            
+            with col_g4:
+                if not exp_df.empty:
+                    def detailed_expense_name(row):
+                        item = row['รายการ']
+                        app_name = row['แอป']
+                        note = str(row['หมายเหตุ']).strip()
+                        
+                        if 'เติมเครดิต' in item: return f"💳 เติม {app_name}"
+                        if 'น้ำมัน' in item or 'ไฟ' in item:
+                            if 'ชาร์จ' in item or 'ชาร์จ' in note: return "⚡ ชาร์จไฟ"
+                            if 'น้ำมัน' in item or 'น้ำมัน' in note: return "⛽ น้ำมัน"
+                            return "⛽ พลังงาน"
+                        if 'ทั่วไป' in item:
+                            if note and note.lower() != 'nan' and note != '': return f"🛠️ {note}"
+                            return "🛠️ จ่ายทั่วไป"
+                        return item
+
+                    exp_df_plot = exp_df.copy()
+                    exp_df_plot['ชื่อรายการกราฟ'] = exp_df_plot.apply(detailed_expense_name, axis=1)
+                    exp_sum = exp_df_plot.groupby('ชื่อรายการกราฟ')['หัก/จ่าย'].sum().reset_index()
+                    exp_sum = exp_sum.sort_values(by='หัก/จ่าย', ascending=True)
+
+                    fig_exp = px.bar(
+                        exp_sum, 
+                        x='หัก/จ่าย', 
+                        y='ชื่อรายการกราฟ', 
+                        title="💸 รายจ่าย (เจาะลึก)", 
+                        color='ชื่อรายการกราฟ', 
+                        text_auto='.0f', # ใช้ .0f ในกราฟไปก่อนเพราะ Plotly ปรับ Custom format ยากกว่า
+                        orientation='h'
+                    )
+                    st.plotly_chart(fig_exp, use_container_width=True)
+                else:
+                    st.info("ยังไม่มีรายจ่าย")
+
+        else: st.warning(f"🔍 ไม่พบข้อมูล ({time_filter})")
     else: st.info("เริ่มบันทึกงานแรกได้เลย")
 
 # ==========================================
@@ -576,8 +600,8 @@ with tab3:
             use_container_width=True, 
             key="editor",
             column_config={
-                "คงเหลือ/สุทธิ": st.column_config.NumberColumn(format="%.0f ฿"),
-                "ยอดเต็ม/หน้าแอป": st.column_config.NumberColumn(format="%.0f ฿"),
+                "คงเหลือ/สุทธิ": st.column_config.NumberColumn(format="%.2f ฿"),
+                "ยอดเต็ม/หน้าแอป": st.column_config.NumberColumn(format="%.2f ฿"),
                 "วันที่": st.column_config.DateColumn(format="YYYY-MM-DD")
             }
         )
@@ -585,10 +609,10 @@ with tab3:
         if st.button("💾 บันทึกการเปลี่ยนแปลง", type="primary"):
             try:
                 if len(df_show) != len(st.session_state.data):
-                      st.warning("⚠️ คุณกำลังกรองข้อมูลอยู่ ระบบจะบันทึกเฉพาะข้อมูลที่เห็นเท่านั้น (แนะนำให้เลือก 'วันที่: ทั้งหมด' ก่อนทำการลบหรือแก้ไข)")
-                      st.session_state.data.update(edited_df) 
+                      st.warning("⚠️ คุณกำลังกรองข้อมูลอยู่ ระบบจะบันทึกเฉพาะข้อมูลที่เห็นเท่านั้น")
+                      st.session_state.data.update(edited_df)
                 else:
-                      st.session_state.data = edited_df 
+                      st.session_state.data = edited_df
                 
                 save_data(st.session_state.data)
                 st.success("บันทึกสำเร็จ!")
