@@ -11,8 +11,7 @@ st.set_page_config(page_title="ระบบบันทึกรายได้�
 SETTINGS_FILE = "settings.json"
 SHEET_NAME = "Drivers" 
 
-# --- FORMATTING HELPER (ฟังก์ชันจัดรูปแบบตัวเลขตามสั่ง) ---
-# แก้ไขให้แม่นยำ: ตัด .00 ทิ้ง แต่ถ้ามีเศษอื่น (.25, .5, .75) ให้แสดง
+# --- FORMATTING HELPER (ฟังก์ชันจัดรูปแบบตัวเลข) ---
 def fmt_num(val):
     if val is None: return "0"
     try:
@@ -37,7 +36,8 @@ def load_settings():
     conn = st.connection("gsheets", type=GSheetsConnection)
     default_settings = {"ev_rate": 50.0, "target_income": 2000.0} 
     try:
-        df = conn.read(worksheet="Settings", ttl=0)
+        # ใช้ TTL ช่วยจำค่า Settings 1 ชั่วโมง (ไม่เปลี่ยนบ่อย)
+        df = conn.read(worksheet="Settings", ttl=3600)
         if not df.empty and 'Key' in df.columns and 'Value' in df.columns:
             settings = dict(zip(df['Key'], df['Value']))
             return settings
@@ -51,14 +51,18 @@ def save_settings(settings):
         data = [{'Key': k, 'Value': str(v)} for k, v in settings.items()]
         df = pd.DataFrame(data)
         conn.update(worksheet="Settings", data=df)
+        st.cache_data.clear() # ล้าง Cache เมื่อมีการบันทึก
     except Exception as e:
         st.error(f"บันทึกค่าตั้งต้นไม่สำเร็จ: {e}")
         
-# --- 3. DATA LOADING ---
-def load_and_clean_data():
+# --- 3. DATA LOADING (Performance Upgrade) ---
+# 🟢 เพิ่ม @st.cache_data เพื่อจำข้อมูลไว้ 10 นาที (ลดการโหลดจาก Google)
+@st.cache_data(ttl=600) 
+def load_and_clean_data_cached():
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        df = conn.read(worksheet=SHEET_NAME, ttl=0)
+        # ใช้ ttl ในการอ่านช่วยอีกแรง
+        df = conn.read(worksheet=SHEET_NAME, ttl=600)
         
         required_cols = [
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
@@ -95,12 +99,16 @@ def load_and_clean_data():
         return df[required_cols]
         
     except Exception as e:
-        st.error(f"⚠️ ไม่พบชีทชื่อ '{SHEET_NAME}' หรือเชื่อมต่อไม่ได้: {e}")
+        # st.error(f"⚠️ โหลดข้อมูลไม่ได้: {e}") # ปิด Error ชั่วคราวเพื่อให้ UI ไม่รก
         return pd.DataFrame(columns=[
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
             'ยอดเต็ม/หน้าแอป', 'หัก/จ่าย', 'ทิป', 'คงเหลือ/สุทธิ', 
             'เงินสดเข้าตัว', 'เลขไมล์', 'หมายเหตุ'
         ])
+
+# ฟังก์ชัน Wrapper เพื่อเรียกใช้ Cache
+def load_and_clean_data():
+    return load_and_clean_data_cached()
 
 def save_data(df):
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -110,6 +118,10 @@ def save_data(df):
             df_save['วันที่'] = df_save['วันที่'].astype(str)
             
         conn.update(worksheet=SHEET_NAME, data=df_save)
+        
+        # 🟢 สำคัญ: ล้าง Cache ทันทีที่บันทึก เพื่อให้เห็นข้อมูลใหม่ล่าสุด
+        st.cache_data.clear()
+        
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
@@ -122,20 +134,18 @@ with st.sidebar:
     st.caption(f"เวลา: {get_thai_time().strftime('%H:%M')}")
     
     if st.button("🔄 รีเฟรชข้อมูล (Cloud)"):
-        st.cache_data.clear()
+        st.cache_data.clear() # ล้าง Cache
         st.session_state.data = load_and_clean_data()
         st.rerun()
     
     current_settings = load_settings()
     
-    # 🟢 แก้ไข: ใช้ int() และ format="%d" เพื่อไม่ให้มีทศนิยม
     saved_rate = int(float(current_settings.get("ev_rate", 50.0)))
     new_ev_rate = st.number_input("ค่าไฟชาร์จบ้าน (เหมา)", value=saved_rate, step=5, format="%d")
     
     st.divider()
     st.markdown("### 🎯 เป้าหมายรายวัน")
     
-    # 🟢 แก้ไข: ใช้ int() และ format="%d"
     saved_target = int(float(current_settings.get("target_income", 2000.0)))
     new_target = st.number_input("ตั้งเป้ารายได้ (บาท)", value=saved_target, step=100, format="%d")
     
@@ -170,14 +180,14 @@ st.title("🚗 ระบบบันทึกรายได้")
 tab1, tab2, tab3 = st.tabs(["📝 บันทึกงาน", "📊 สรุปผลละเอียด", "🗂️ ฐานข้อมูล"])
 
 # ==========================================
-# TAB 1: บันทึกงาน (แก้ไข Input เป็นจำนวนเต็ม)
+# TAB 1: บันทึกงาน
 # ==========================================
 with tab1:
     def get_last_odom():
         df = st.session_state.data
         if not df.empty:
             max_odom = df['เลขไมล์'].max()
-            return int(max_odom) if max_odom > 0 else 0 # 🟢 คืนค่าเป็น int
+            return int(max_odom) if max_odom > 0 else 0
         return 0
 
     def get_work_status():
@@ -207,9 +217,9 @@ with tab1:
 
     st.divider()
 
-    # --- ส่วนที่ 2: จัดการกะงาน (แก้ไข Input เลขไมล์) ---
+    # --- ส่วนที่ 2: จัดการกะงาน ---
     current_status = get_work_status()
-    last_odom_val = get_last_odom() # เป็น int แล้ว
+    last_odom_val = get_last_odom()
 
     if "เริ่ม" in current_status:
         expander_label = f"🟢 สถานะ: วิ่งงานอยู่ (เริ่มที่ {fmt_num(last_odom_val)} กม.) - คลิกเพื่อจบกะ 🔽"
@@ -222,7 +232,6 @@ with tab1:
         if "เริ่ม" in current_status:
             c_end_1, c_end_2 = st.columns([2, 1]) 
             with c_end_1:
-                # 🟢 แก้ไข: value, min_value เป็น int, step=1, format="%d"
                 end_odom = st.number_input("เลขไมล์จบ", min_value=last_odom_val, value=None, placeholder="เลขไมล์ปัจจุบัน", step=1, format="%d", label_visibility="collapsed")
             with c_end_2:
                 if st.button("🌙 ยืนยันจบกะ", type="primary", use_container_width=True):
@@ -240,7 +249,6 @@ with tab1:
         else:
             c_start_1, c_start_2 = st.columns([2, 1])
             with c_start_1:
-                # 🟢 แก้ไข: value, min_value เป็น int, step=1, format="%d"
                 start_odom = st.number_input("เลขไมล์เริ่ม", min_value=0, value=last_odom_val, step=1, format="%d", label_visibility="collapsed")
             with c_start_2:
                 if st.button("🚀 ยืนยันเริ่ม", type="primary", use_container_width=True):
@@ -254,7 +262,7 @@ with tab1:
                     save_data(st.session_state.data)
                     st.rerun()
 
-    # --- ส่วนที่ 3: แบบฟอร์มบันทึก (แก้ไข Input เงิน) ---
+    # --- ส่วนที่ 3: แบบฟอร์มบันทึก ---
     st.markdown("### 📝 บันทึกรายการ")
     sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["🚗 รับงาน", "⛽ เติมของ", "💳 เติมแอป", "🛠️ จ่ายอื่น"])
     
@@ -267,10 +275,8 @@ with tab1:
 
             c3, c4 = st.columns(2)
             with c3: 
-                # 🟢 แก้ไข: ใช้ int, step=1, format="%d" (ใส่เลขได้เลย ไม่ต้องลบ .00)
                 app_price = st.number_input("ราคาหน้าแอป", min_value=0, value=None, placeholder="0", step=1, format="%d")
             with c4: 
-                # 🟢 แก้ไข: ใช้ int, step=1, format="%d"
                 real_receive = st.number_input("รับจริง (รวมทิป)", min_value=0, value=None, placeholder="0", step=1, format="%d")
             
             note = st.text_input("หมายเหตุ", placeholder="บันทึกช่วยจำ")
@@ -310,7 +316,6 @@ with tab1:
         with st.form(key="form_energy", clear_on_submit=True):
             e_type = st.radio("ประเภท", ["⛽ น้ำมัน", "⚡ ชาร์จบ้าน (เหมา)", "🔌 ชาร์จสถานี"], horizontal=True)
             default_val = int(ev_home_rate) if e_type == "⚡ ชาร์จบ้าน (เหมา)" else None
-            # 🟢 แก้ไข: Input เงินเป็น int
             cost = st.number_input("จำนวนเงิน", min_value=0, value=default_val, placeholder="0", step=1, format="%d")
             note = st.text_input("สถานที่ / หมายเหตุ")
             
@@ -331,7 +336,6 @@ with tab1:
         st.info("💡 การเติมเครดิตที่นี่ จะถูกนำไปคำนวณเป็น 'ต้นทุนค่าคอมมิชชั่น' ของแต่ละแอป")
         with st.form(key="form_topup", clear_on_submit=True):
             sub_cat = st.selectbox("แอป", ["Grab", "Bolt", "Maxim", "Line Man", "Robinhood", "Win", "งานนอก"])
-            # 🟢 แก้ไข: Input เงินเป็น int
             cost = st.number_input("จำนวนเงินที่เติม/โดนหัก", min_value=0, value=None, placeholder="0", step=1, format="%d")
             if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
                 if cost:
@@ -344,7 +348,6 @@ with tab1:
     with sub_tab4:
         with st.form(key="form_other", clear_on_submit=True):
             sub_cat = st.text_input("รายการ (เช่น ข้าว, ปะยาง)")
-            # 🟢 แก้ไข: Input เงินเป็น int
             cost = st.number_input("จำนวนเงิน", min_value=0, value=None, placeholder="0", step=1, format="%d")
             if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
                 if cost:
@@ -352,9 +355,9 @@ with tab1:
                     st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
                     save_data(st.session_state.data)
                     st.rerun()
-                    
+
 # ==========================================
-# TAB 2: สรุปผล (Final Fixed: Drill Down + Expense Breakdown)
+# TAB 2: สรุปผล
 # ==========================================
 import calendar
 
@@ -497,43 +500,28 @@ with tab2:
 
             st.divider()
 
-            # --- ส่วนวิเคราะห์ GP (แก้ไข Logic รวม Grab Wallet) ---
+            # --- ส่วนวิเคราะห์ GP ---
             with st.expander("💸 วิเคราะห์ความคุ้มค่า (GP & ค่าคอม)", expanded=True):
-                # ดึงข้อมูลรายจ่ายมา (และใช้ .copy() เพื่อไม่ให้กระทบข้อมูลจริง)
                 app_expenses = exp_df[~exp_df['แอป'].isin(['ค่าใช้จ่าย', 'ระบบ'])].copy()
-                
-                # 🟢 บรรทัดสำคัญ: แปลงชื่อ "Grab Wallet" ให้เป็น "Grab" ชั่วคราวเพื่อการคำนวณ
                 app_expenses['แอป'] = app_expenses['แอป'].replace({'Grab Wallet': 'Grab'})
                 
                 app_incomes = inc_df.copy()
-                
                 if not app_incomes.empty:
                     gp_data = []
                     all_apps = set(app_incomes['แอป'].unique()) | set(app_expenses['แอป'].unique())
-                    
                     for app in all_apps:
                         gross_income = app_incomes[app_incomes['แอป'] == app]['ยอดเต็ม/หน้าแอป'].sum()
                         deduct_from_expense = app_expenses[app_expenses['แอป'] == app]['หัก/จ่าย'].sum()
                         deduct_from_income = app_incomes[app_incomes['แอป'] == app]['หัก/จ่าย'].sum()
-                        
                         total_deduction = deduct_from_expense + deduct_from_income
-
                         if gross_income > 0:
                             gp_pct = (total_deduction / gross_income) * 100
-                            gp_data.append({
-                                "แอป": app, 
-                                "GP (%)": gp_pct, 
-                                "ค่าคอม/เติมเกม (บ.)": total_deduction, 
-                                "ยอดหน้าแอป (บ.)": gross_income
-                            })
-                    
+                            gp_data.append({"แอป": app, "GP (%)": gp_pct, "ค่าคอม/เติมเกม (บ.)": total_deduction, "ยอดหน้าแอป (บ.)": gross_income})
                     if gp_data:
                         gp_df = pd.DataFrame(gp_data).sort_values(by="GP (%)", ascending=True)
                         c_gp1, c_gp2 = st.columns([1, 2])
-                        with c_gp1: 
-                            st.dataframe(gp_df, column_config={"GP (%)": st.column_config.NumberColumn(format="%.1f %%"), "ค่าคอม/เติมเกม (บ.)": st.column_config.NumberColumn(format="%.0f"), "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")}, hide_index=True, use_container_width=True)
-                        with c_gp2: 
-                            st.plotly_chart(px.bar(gp_df, x='GP (%)', y='แอป', orientation='h', title="📉 Deduction vs Gross", text_auto='.1f', color='GP (%)', color_continuous_scale='Reds'), use_container_width=True)
+                        with c_gp1: st.dataframe(gp_df, column_config={"GP (%)": st.column_config.NumberColumn(format="%.1f %%"), "ค่าคอม/เติมเกม (บ.)": st.column_config.NumberColumn(format="%.0f"), "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")}, hide_index=True, use_container_width=True)
+                        with c_gp2: st.plotly_chart(px.bar(gp_df, x='GP (%)', y='แอป', orientation='h', title="📉 Deduction vs Gross", text_auto='.1f', color='GP (%)', color_continuous_scale='Reds'), use_container_width=True)
                     else: st.info("ข้อมูลไม่เพียงพอ")
                 else: st.info("ไม่มีข้อมูลรายรับ")
 
@@ -553,7 +541,7 @@ with tab2:
                     if not hm.empty:
                         st.plotly_chart(px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens"), use_container_width=True)
 
-            # --- 🟢 (กู้คืน) กราฟรายจ่ายเจาะลึก ---
+            # --- กราฟรายจ่ายเจาะลึก ---
             st.markdown("### 💸 รายจ่าย (เจาะลึก)")
             if not exp_df.empty:
                 def detailed_expense_name(row):
@@ -578,7 +566,6 @@ with tab2:
                     exp_sum, 
                     x='หัก/จ่าย', 
                     y='ชื่อรายการกราฟ', 
-                    # title="💸 รายจ่ายแยกตามประเภท", 
                     color='ชื่อรายการกราฟ', 
                     text_auto='.0f',
                     orientation='h'
@@ -591,7 +578,7 @@ with tab2:
     else: st.info("เริ่มบันทึกงานแรกได้เลย")
 
 # ==========================================
-# TAB 3: ฐานข้อมูล
+# TAB 3: ฐานข้อมูล (Performance Upgrade)
 # ==========================================
 with tab3:
     st.subheader("🗂️ ฐานข้อมูล")
@@ -603,7 +590,8 @@ with tab3:
         
         f_app = c1.multiselect("แอป", apps)
         f_cat = c2.multiselect("หมวดหมู่", cats)
-        f_date = c3.selectbox("วันที่", ["ทั้งหมด", "วันนี้", "เดือนนี้"])
+        # 🟢 แก้ไข: ตั้งค่าเริ่มต้นเป็น "เดือนนี้" เพื่อไม่ให้โหลดหนักเกินไป
+        f_date = c3.selectbox("วันที่", ["เดือนนี้", "วันนี้", "ทั้งหมด"])
 
     df_show = st.session_state.data.copy()
     if not df_show.empty:
@@ -640,6 +628,3 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
-
-
-
