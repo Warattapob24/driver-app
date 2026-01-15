@@ -274,7 +274,7 @@ with tab1:
                     st.rerun()
 
 # ==========================================
-# TAB 2: สรุปผล
+# TAB 2: สรุปผล (แก้ไข Error วันที่)
 # ==========================================
 with tab2:
     with st.sidebar:
@@ -286,31 +286,54 @@ with tab2:
             if len(dr) == 2: custom_s, custom_e = dr
 
     st.markdown(f"### 📊 แดชบอร์ด: {time_filter}")
-    df = st.session_state.data
+    
+    # 🟢 1. เตรียมข้อมูลและแปลงวันที่ให้ชัวร์ก่อนกรอง
+    df = st.session_state.data.copy()
     if not df.empty:
-        today = get_thai_date()
+        # แปลงคอลัมน์ 'วันที่' ให้เป็น datetime ของ pandas จริงๆ เพื่อแก้ปัญหา TypeError
+        df['วันที่_filter'] = pd.to_datetime(df['วันที่'], errors='coerce')
+        
+        # เตรียมตัวแปรวันที่ปัจจุบันแบบ pandas timestamp
+        today = pd.to_datetime(get_thai_date())
         f_df = df.copy()
         
-        # Filter Logic
+        # --- Filter Logic (ใช้ 'วันที่_filter' ในการกรอง) ---
         days_count = 1
-        if time_filter == "วันนี้": f_df = df[df['วันที่'] == today]
-        elif time_filter == "เมื่อวาน": f_df = df[df['วันที่'] == today - datetime.timedelta(days=1)]
+        
+        if time_filter == "วันนี้": 
+            f_df = df[df['วันที่_filter'].dt.date == today.date()]
+            
+        elif time_filter == "เมื่อวาน": 
+            target_date = today - pd.Timedelta(days=1)
+            f_df = df[df['วันที่_filter'].dt.date == target_date.date()]
+            
         elif time_filter == "สัปดาห์นี้":
-            start = today - datetime.timedelta(days=today.weekday())
-            f_df = df[(df['วันที่'] >= start) & (df['วันที่'] <= start + datetime.timedelta(days=6))]
+            start = today - pd.Timedelta(days=today.weekday())
+            end = start + pd.Timedelta(days=6)
+            f_df = df[(df['วันที่_filter'] >= start) & (df['วันที่_filter'] <= end)]
             days_count = 7
+            
         elif time_filter == "เดือนนี้":
-            f_df = df[(pd.to_datetime(df['วันที่']).dt.month == today.month) & (pd.to_datetime(df['วันที่']).dt.year == today.year)]
+            f_df = df[(df['วันที่_filter'].dt.month == today.month) & (df['วันที่_filter'].dt.year == today.year)]
             days_count = calendar.monthrange(today.year, today.month)[1]
+            
         elif time_filter == "เดือนที่แล้ว":
-            first = today.replace(day=1); last_prev = first - datetime.timedelta(days=1); start_prev = last_prev.replace(day=1)
-            f_df = df[(df['วันที่'] >= start_prev) & (df['วันที่'] <= last_prev)]
+            # หาวันแรกของเดือนนี้ แล้วถอยไป 1 วันจะได้วันสิ้นเดือนที่แล้ว
+            first_of_month = today.replace(day=1)
+            last_prev = first_of_month - pd.Timedelta(days=1)
+            start_prev = last_prev.replace(day=1)
+            f_df = df[(df['วันที่_filter'] >= start_prev) & (df['วันที่_filter'] <= last_prev)]
             days_count = calendar.monthrange(start_prev.year, start_prev.month)[1]
+            
         elif time_filter == "ปีนี้":
-            f_df = df[pd.to_datetime(df['วันที่']).dt.year == today.year]
+            f_df = df[df['วันที่_filter'].dt.year == today.year]
             days_count = 365
+            
         elif time_filter == "กำหนดเอง" and custom_s and custom_e:
-            f_df = df[(df['วันที่'] >= custom_s) & (df['วันที่'] <= custom_e)]
+            # แปลง custom_s/e ให้เป็น timestamp เพื่อเปรียบเทียบ
+            ts_start = pd.to_datetime(custom_s)
+            ts_end = pd.to_datetime(custom_e)
+            f_df = df[(df['วันที่_filter'] >= ts_start) & (df['วันที่_filter'] <= ts_end)]
             days_count = (custom_e - custom_s).days + 1
 
         if not f_df.empty:
@@ -463,3 +486,4 @@ with tab3:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
     else:
         st.info("ไม่มีข้อมูล")
+
