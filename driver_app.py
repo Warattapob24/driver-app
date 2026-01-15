@@ -354,15 +354,16 @@ with tab1:
                     save_data(st.session_state.data)
                     st.rerun()
 
-    # 3. เติมเครดิต (สำคัญสำหรับ GP)
+    # 3. เติมเครดิต (แก้ไขชื่อ Grab Wallet -> Grab)
     with sub_tab3:
         st.info("💡 การเติมเครดิตที่นี่ จะถูกนำไปคำนวณเป็น 'ต้นทุนค่าคอมมิชชั่น' ของแต่ละแอป")
         with st.form(key="form_topup", clear_on_submit=True):
-            sub_cat = st.selectbox("แอป", ["Grab Wallet", "Bolt", "Maxim", "Line Man", "Robinhood", "Win", "งานนอก"])
+            # 🟢 แก้ไขตรงนี้: เปลี่ยน "Grab Wallet" เป็น "Grab" ให้ตรงกับฝั่งรายรับ
+            sub_cat = st.selectbox("แอป", ["Grab", "Bolt", "Maxim", "Line Man", "Robinhood", "Win", "งานนอก"])
+            
             cost = st.number_input("จำนวนเงินที่เติม/โดนหัก", min_value=0.0, value=None, placeholder="0")
             if st.form_submit_button("บันทึก", type="primary", use_container_width=True):
                 if cost:
-                    # บันทึกเป็นรายจ่าย โดยระบุชื่อแอป เพื่อให้ไปจับคู่คำนวณ GP ได้
                     new_row = {'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"), 'แอป': sub_cat, 'หมวดหมู่': 'รายจ่าย', 'รายการ': 'เติมเครดิต', 'ช่องทางรับเงิน': 'จ่ายสด', 'ยอดเต็ม/หน้าแอป': 0, 'หัก/จ่าย': cost, 'ทิป': 0, 'คงเหลือ/สุทธิ': -cost, 'เงินสดเข้าตัว': -cost, 'เลขไมล์': 0, 'หมายเหตุ': 'Top-up'}
                     st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([new_row])], ignore_index=True)
                     save_data(st.session_state.data)
@@ -524,26 +525,43 @@ with tab2:
 
             st.divider()
 
-            # --- ส่วนวิเคราะห์ GP ---
+            # --- ส่วนวิเคราะห์ GP (แก้ไข Logic รวม Grab Wallet) ---
             with st.expander("💸 วิเคราะห์ความคุ้มค่า (GP & ค่าคอม)", expanded=True):
-                app_expenses = exp_df[~exp_df['แอป'].isin(['ค่าใช้จ่าย', 'ระบบ'])]
+                # ดึงข้อมูลรายจ่ายมา (และใช้ .copy() เพื่อไม่ให้กระทบข้อมูลจริง)
+                app_expenses = exp_df[~exp_df['แอป'].isin(['ค่าใช้จ่าย', 'ระบบ'])].copy()
+                
+                # 🟢 บรรทัดสำคัญ: แปลงชื่อ "Grab Wallet" ให้เป็น "Grab" ชั่วคราวเพื่อการคำนวณ
+                app_expenses['แอป'] = app_expenses['แอป'].replace({'Grab Wallet': 'Grab'})
+                
                 app_incomes = inc_df.copy()
+                
                 if not app_incomes.empty:
                     gp_data = []
                     all_apps = set(app_incomes['แอป'].unique()) | set(app_expenses['แอป'].unique())
+                    
                     for app in all_apps:
                         gross_income = app_incomes[app_incomes['แอป'] == app]['ยอดเต็ม/หน้าแอป'].sum()
                         deduct_from_expense = app_expenses[app_expenses['แอป'] == app]['หัก/จ่าย'].sum()
                         deduct_from_income = app_incomes[app_incomes['แอป'] == app]['หัก/จ่าย'].sum()
+                        
                         total_deduction = deduct_from_expense + deduct_from_income
+
                         if gross_income > 0:
                             gp_pct = (total_deduction / gross_income) * 100
-                            gp_data.append({"แอป": app, "GP (%)": gp_pct, "ค่าคอม/เติมเกม (บ.)": total_deduction, "ยอดหน้าแอป (บ.)": gross_income})
+                            gp_data.append({
+                                "แอป": app, 
+                                "GP (%)": gp_pct, 
+                                "ค่าคอม/เติมเกม (บ.)": total_deduction, 
+                                "ยอดหน้าแอป (บ.)": gross_income
+                            })
+                    
                     if gp_data:
                         gp_df = pd.DataFrame(gp_data).sort_values(by="GP (%)", ascending=True)
                         c_gp1, c_gp2 = st.columns([1, 2])
-                        with c_gp1: st.dataframe(gp_df, column_config={"GP (%)": st.column_config.NumberColumn(format="%.1f %%"), "ค่าคอม/เติมเกม (บ.)": st.column_config.NumberColumn(format="%.0f"), "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")}, hide_index=True, use_container_width=True)
-                        with c_gp2: st.plotly_chart(px.bar(gp_df, x='GP (%)', y='แอป', orientation='h', title="📉 Deduction vs Gross", text_auto='.1f', color='GP (%)', color_continuous_scale='Reds'), use_container_width=True)
+                        with c_gp1: 
+                            st.dataframe(gp_df, column_config={"GP (%)": st.column_config.NumberColumn(format="%.1f %%"), "ค่าคอม/เติมเกม (บ.)": st.column_config.NumberColumn(format="%.0f"), "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")}, hide_index=True, use_container_width=True)
+                        with c_gp2: 
+                            st.plotly_chart(px.bar(gp_df, x='GP (%)', y='แอป', orientation='h', title="📉 Deduction vs Gross", text_auto='.1f', color='GP (%)', color_continuous_scale='Reds'), use_container_width=True)
                     else: st.info("ข้อมูลไม่เพียงพอ")
                 else: st.info("ไม่มีข้อมูลรายรับ")
 
@@ -650,4 +668,5 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
 
