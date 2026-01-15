@@ -515,7 +515,7 @@ with tab2:
                             gp_data.append({
                                 "แอป": app,
                                 "GP (%)": gp_pct,
-                                "ค่าคอม/เติมเกม (บ.)": total_deduction,
+                                "ค่าคอม/เติมแอป (บ.)": total_deduction,
                                 "ยอดหน้าแอป (บ.)": gross_income
                             })
                     
@@ -528,7 +528,7 @@ with tab2:
                                 gp_df, 
                                 column_config={
                                     "GP (%)": st.column_config.NumberColumn(format="%.1f %%"),
-                                    "ค่าคอม/เติมเกม (บ.)": st.column_config.NumberColumn(format="%.0f"),
+                                    "ค่าคอม/เติมแอป (บ.)": st.column_config.NumberColumn(format="%.0f"),
                                     "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f"),
                                 },
                                 hide_index=True,
@@ -667,3 +667,4 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
