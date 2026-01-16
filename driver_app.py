@@ -357,7 +357,7 @@ with tab1:
                     st.rerun()
 
 # ==========================================
-# TAB 2: สรุปผล
+# TAB 2: สรุปผล (Final: Total Cost Calculation)
 # ==========================================
 import calendar
 
@@ -404,6 +404,7 @@ with tab2:
             days_count = (custom_end - custom_start).days + 1
 
         if not f_df.empty:
+            # แยก Dataframe รายรับ / รายจ่าย
             inc_df = f_df[f_df['หมวดหมู่'] == 'รายรับ']
             exp_df = f_df[f_df['หมวดหมู่'] == 'รายจ่าย']
             
@@ -474,7 +475,7 @@ with tab2:
             
             st.divider()
 
-            # --- 🟢 ส่วนกราฟ Drill Down (เลือกหัวข้อ) ---
+            # --- 🟢 ส่วนกราฟ Drill Down ---
             st.markdown("### 📈 เจาะลึกประวัติสถิติ (คลิกเลือกหัวข้อ)")
             chart_mode = st.radio(
                 "เลือกข้อมูลที่ต้องการดูกราฟ:",
@@ -500,28 +501,71 @@ with tab2:
 
             st.divider()
 
-            # --- ส่วนวิเคราะห์ GP ---
+            # --- 🟢 ส่วนวิเคราะห์ GP (แก้ไข Logic รวมทุกทาง) ---
             with st.expander("💸 วิเคราะห์ความคุ้มค่า (GP & ค่าคอม)", expanded=True):
+                # 1. รายจ่าย: ดึงเฉพาะที่เกี่ยวกับแอป (ตัดค่าน้ำมัน/กินข้าวออก)
                 app_expenses = exp_df[~exp_df['แอป'].isin(['ค่าใช้จ่าย', 'ระบบ'])].copy()
-                app_expenses['แอป'] = app_expenses['แอป'].replace({'Grab Wallet': 'Grab'})
+                app_expenses['แอป'] = app_expenses['แอป'].replace({'Grab Wallet': 'Grab'}) # แก้ชื่อให้ตรง
                 
+                # 2. รายรับ: ดึงมาทั้งหมด
                 app_incomes = inc_df.copy()
+                
                 if not app_incomes.empty:
                     gp_data = []
+                    # รวมรายชื่อแอปทั้งหมดที่มีความเคลื่อนไหว
                     all_apps = set(app_incomes['แอป'].unique()) | set(app_expenses['แอป'].unique())
+                    
                     for app in all_apps:
+                        # A. รายรับรวมหน้าแอป (Gross)
                         gross_income = app_incomes[app_incomes['แอป'] == app]['ยอดเต็ม/หน้าแอป'].sum()
-                        deduct_from_expense = app_expenses[app_expenses['แอป'] == app]['หัก/จ่าย'].sum()
-                        deduct_from_income = app_incomes[app_incomes['แอป'] == app]['หัก/จ่าย'].sum()
-                        total_deduction = deduct_from_expense + deduct_from_income
+                        
+                        # B. ต้นทุนจากการเติมเครดิต (Top-up Expense)
+                        cost_from_topup = app_expenses[app_expenses['แอป'] == app]['หัก/จ่าย'].sum()
+                        
+                        # C. ต้นทุนจากการโดนหักหน้างาน (Deduction from Income)
+                        # เช่น ลูกค้าจ่ายบัตร 100 เราได้ 70 -> โดนหัก 30 (ระบบบันทึกในช่อง 'หัก/จ่าย' ของรายรับ)
+                        cost_from_deduction = app_incomes[app_incomes['แอป'] == app]['หัก/จ่าย'].sum()
+                        
+                        # รวมต้นทุนทั้งหมด
+                        total_cost = cost_from_topup + cost_from_deduction
+
                         if gross_income > 0:
-                            gp_pct = (total_deduction / gross_income) * 100
-                            gp_data.append({"แอป": app, "GP (%)": gp_pct, "ค่าคอม/เติมเกม (บ.)": total_deduction, "ยอดหน้าแอป (บ.)": gross_income})
+                            gp_pct = (total_cost / gross_income) * 100
+                            gp_data.append({
+                                "แอป": app, 
+                                "GP (%)": gp_pct, 
+                                "โดนหักรวม (บ.)": total_cost, 
+                                "ยอดหน้าแอป (บ.)": gross_income
+                            })
+                    
                     if gp_data:
                         gp_df = pd.DataFrame(gp_data).sort_values(by="GP (%)", ascending=True)
                         c_gp1, c_gp2 = st.columns([1, 2])
-                        with c_gp1: st.dataframe(gp_df, column_config={"GP (%)": st.column_config.NumberColumn(format="%.1f %%"), "ค่าคอม/เติมเกม (บ.)": st.column_config.NumberColumn(format="%.0f"), "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")}, hide_index=True, use_container_width=True)
-                        with c_gp2: st.plotly_chart(px.bar(gp_df, x='GP (%)', y='แอป', orientation='h', title="📉 Deduction vs Gross", text_auto='.1f', color='GP (%)', color_continuous_scale='Reds'), use_container_width=True)
+                        with c_gp1: 
+                            st.dataframe(
+                                gp_df, 
+                                column_config={
+                                    "GP (%)": st.column_config.NumberColumn(format="%.1f %%"),
+                                    "โดนหักรวม (บ.)": st.column_config.NumberColumn(format="%.0f", help="รวมทั้งเติมเครดิต และโดนหักจากยอดงาน"), 
+                                    "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")
+                                }, 
+                                hide_index=True, 
+                                use_container_width=True
+                            )
+                        with c_gp2: 
+                            st.plotly_chart(
+                                px.bar(
+                                    gp_df, 
+                                    x='GP (%)', 
+                                    y='แอป', 
+                                    orientation='h', 
+                                    title="📉 เปรียบเทียบ % ค่าคอมมิชชั่นจริง (Total Cost)", 
+                                    text_auto='.1f', 
+                                    color='GP (%)', 
+                                    color_continuous_scale='Reds'
+                                ), 
+                                use_container_width=True
+                            )
                     else: st.info("ข้อมูลไม่เพียงพอ")
                 else: st.info("ไม่มีข้อมูลรายรับ")
 
@@ -576,7 +620,7 @@ with tab2:
 
         else: st.warning(f"🔍 ไม่พบข้อมูล ({time_filter})")
     else: st.info("เริ่มบันทึกงานแรกได้เลย")
-
+                
 # ==========================================
 # TAB 3: ฐานข้อมูล (Performance Upgrade)
 # ==========================================
@@ -628,3 +672,4 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
+
