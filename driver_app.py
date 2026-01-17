@@ -11,15 +11,15 @@ st.set_page_config(page_title="ระบบบันทึกรายได้�
 SETTINGS_FILE = "settings.json"
 SHEET_NAME = "Drivers" 
 
-# --- FORMATTING HELPER (ฟังก์ชันจัดรูปแบบตัวเลข) ---
+# --- FORMATTING HELPER ---
 def fmt_num(val):
     if val is None: return "0"
     try:
         f_val = float(val)
         if f_val.is_integer():
-            return f"{int(f_val):,}" # ไม่มีทศนิยม
+            return f"{int(f_val):,}"
         else:
-            return f"{f_val:,.2f}".rstrip('0').rstrip('.') # มีทศนิยม ตัด 0 ห้อยท้าย
+            return f"{f_val:,.2f}".rstrip('0').rstrip('.')
     except:
         return str(val)
 
@@ -36,7 +36,6 @@ def load_settings():
     conn = st.connection("gsheets", type=GSheetsConnection)
     default_settings = {"ev_rate": 50.0, "target_income": 2000.0} 
     try:
-        # ใช้ TTL ช่วยจำค่า Settings 1 ชั่วโมง (ไม่เปลี่ยนบ่อย)
         df = conn.read(worksheet="Settings", ttl=3600)
         if not df.empty and 'Key' in df.columns and 'Value' in df.columns:
             settings = dict(zip(df['Key'], df['Value']))
@@ -51,17 +50,15 @@ def save_settings(settings):
         data = [{'Key': k, 'Value': str(v)} for k, v in settings.items()]
         df = pd.DataFrame(data)
         conn.update(worksheet="Settings", data=df)
-        st.cache_data.clear() # ล้าง Cache เมื่อมีการบันทึก
+        st.cache_data.clear()
     except Exception as e:
         st.error(f"บันทึกค่าตั้งต้นไม่สำเร็จ: {e}")
         
-# --- 3. DATA LOADING (Performance Upgrade) ---
-# 🟢 เพิ่ม @st.cache_data เพื่อจำข้อมูลไว้ 10 นาที (ลดการโหลดจาก Google)
+# --- 3. DATA LOADING (Smart Cache) ---
 @st.cache_data(ttl=600) 
 def load_and_clean_data_cached():
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        # ใช้ ttl ในการอ่านช่วยอีกแรง
         df = conn.read(worksheet=SHEET_NAME, ttl=600)
         
         required_cols = [
@@ -99,14 +96,12 @@ def load_and_clean_data_cached():
         return df[required_cols]
         
     except Exception as e:
-        # st.error(f"⚠️ โหลดข้อมูลไม่ได้: {e}") # ปิด Error ชั่วคราวเพื่อให้ UI ไม่รก
         return pd.DataFrame(columns=[
             'วันที่', 'เวลา', 'แอป', 'หมวดหมู่', 'รายการ', 'ช่องทางรับเงิน',
             'ยอดเต็ม/หน้าแอป', 'หัก/จ่าย', 'ทิป', 'คงเหลือ/สุทธิ', 
             'เงินสดเข้าตัว', 'เลขไมล์', 'หมายเหตุ'
         ])
 
-# ฟังก์ชัน Wrapper เพื่อเรียกใช้ Cache
 def load_and_clean_data():
     return load_and_clean_data_cached()
 
@@ -116,12 +111,8 @@ def save_data(df):
         df_save = df.copy()
         if 'วันที่' in df_save.columns:
             df_save['วันที่'] = df_save['วันที่'].astype(str)
-            
         conn.update(worksheet=SHEET_NAME, data=df_save)
-        
-        # 🟢 สำคัญ: ล้าง Cache ทันทีที่บันทึก เพื่อให้เห็นข้อมูลใหม่ล่าสุด
         st.cache_data.clear()
-        
     except Exception as e:
         st.error(f"บันทึกไม่สำเร็จ: {e}")
 
@@ -134,7 +125,7 @@ with st.sidebar:
     st.caption(f"เวลา: {get_thai_time().strftime('%H:%M')}")
     
     if st.button("🔄 รีเฟรชข้อมูล (Cloud)"):
-        st.cache_data.clear() # ล้าง Cache
+        st.cache_data.clear()
         st.session_state.data = load_and_clean_data()
         st.rerun()
     
@@ -155,10 +146,8 @@ with st.sidebar:
     if new_ev_rate != saved_rate or new_target != saved_target:
         current_settings["ev_rate"] = new_ev_rate
         current_settings["target_income"] = new_target
-        
         save_settings(current_settings)
         st.toast(f"บันทึกการตั้งค่าลง Cloud แล้ว! ☁️")
-        
         import time
         time.sleep(1)
         st.rerun()
@@ -167,7 +156,6 @@ with st.sidebar:
     with st.expander("⚠️ พื้นที่อันตราย (ล้างข้อมูล)"):
         st.warning("การกระทำนี้จะลบข้อมูลทั้งหมดและกู้คืนยาก")
         confirm_delete = st.checkbox("ฉันยืนยันที่จะลบข้อมูลทั้งหมด")
-        
         if confirm_delete:
             if st.button("ยืนยันการล้างข้อมูล 🗑️", type="primary", use_container_width=True):
                 st.session_state.data = st.session_state.data.iloc[0:0] 
@@ -198,7 +186,7 @@ with tab1:
                 return shift_df.iloc[-1]['รายการ']
         return "🌙 เลิกงาน"
 
-    # --- ส่วนที่ 1: แถบพลัง ---
+    # --- แถบพลัง ---
     today = get_thai_date()
     df = st.session_state.data
     
@@ -217,7 +205,7 @@ with tab1:
 
     st.divider()
 
-    # --- ส่วนที่ 2: จัดการกะงาน ---
+    # --- จัดการกะงาน ---
     current_status = get_work_status()
     last_odom_val = get_last_odom()
 
@@ -262,7 +250,7 @@ with tab1:
                     save_data(st.session_state.data)
                     st.rerun()
 
-    # --- ส่วนที่ 3: แบบฟอร์มบันทึก ---
+    # --- แบบฟอร์มบันทึก ---
     st.markdown("### 📝 บันทึกรายการ")
     sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["🚗 รับงาน", "⛽ เติมของ", "💳 เติมแอป", "🛠️ จ่ายอื่น"])
     
@@ -290,18 +278,22 @@ with tab1:
                     if real_val == 0 and price_val > 0: real_val = price_val 
                     tip = max(0, real_val - price_val)
                     
+                    # 🟢 LOGIC สำคัญ: คำนวณยอดหัก (Deduction) สำหรับงานตัดบัตร
                     deducted = 0
                     if pay_method == "💳 ตัดบัตร/แอป":
+                        # ถ้าราคาหน้าแอปมากกว่ารับจริง แสดงว่าโดนหัก
                         if price_val > real_val:
                             deducted = price_val - real_val
-                            tip = 0
+                            tip = 0 # ถ้ายอดรับจริงน้อยกว่าหน้าแอป แสดงว่าไม่มีทิป (หรือทิปรวมอยู่ในนั้นแล้วแต่ยังโดนหักอยู่ดี)
                     
                     cash_in_hand = real_val if "เงินสด" in pay_method else 0.0
 
                     new_row = {
                         'วันที่': get_thai_date(), 'เวลา': get_thai_time().strftime("%H:%M"),
                         'แอป': platform, 'หมวดหมู่': 'รายรับ', 'รายการ': 'ค่าโดยสาร', 'ช่องทางรับเงิน': pay_method,
-                        'ยอดเต็ม/หน้าแอป': price_val, 'หัก/จ่าย': deducted, 'ทิป': tip, 
+                        'ยอดเต็ม/หน้าแอป': price_val, 
+                        'หัก/จ่าย': deducted, # บันทึกยอดที่โดนหักตรงนี้
+                        'ทิป': tip, 
                         'คงเหลือ/สุทธิ': real_val, 'เงินสดเข้าตัว': cash_in_hand, 
                         'เลขไมล์': 0, 'หมายเหตุ': note
                     }
@@ -357,7 +349,7 @@ with tab1:
                     st.rerun()
 
 # ==========================================
-# TAB 2: สรุปผล (Final: Total Cost Calculation)
+# TAB 2: สรุปผล
 # ==========================================
 import calendar
 
@@ -404,17 +396,15 @@ with tab2:
             days_count = (custom_end - custom_start).days + 1
 
         if not f_df.empty:
-            # แยก Dataframe รายรับ / รายจ่าย
             inc_df = f_df[f_df['หมวดหมู่'] == 'รายรับ']
             exp_df = f_df[f_df['หมวดหมู่'] == 'รายจ่าย']
             
-            # --- 1. เตรียมข้อมูลรายวัน (Daily Data) ---
+            # --- Daily Data ---
             daily_income = f_df[f_df['หมวดหมู่']=='รายรับ'].groupby('วันที่')['คงเหลือ/สุทธิ'].sum()
             daily_expense = f_df[f_df['หมวดหมู่']=='รายจ่าย'].groupby('วันที่')['หัก/จ่าย'].sum()
             daily_cash = f_df.groupby('วันที่')['เงินสดเข้าตัว'].sum()
             daily_dist = f_df[f_df['เลขไมล์'] > 0].groupby('วันที่')['เลขไมล์'].agg(lambda x: x.max() - x.min())
             
-            # คำนวณชั่วโมงขับ
             daily_hours = {}
             shift_df = f_df[f_df['หมวดหมู่'] == 'กะงาน']
             for d in f_df['วันที่'].unique():
@@ -442,7 +432,7 @@ with tab2:
             daily_master['ชั่วโมงขับ'] = daily_hours_series
             daily_master = daily_master.fillna(0).reset_index().rename(columns={'index':'วันที่'})
 
-            # --- 2. Metrics รวม ---
+            # --- Metrics ---
             net = daily_master['กำไรสุทธิ'].sum()
             dist = daily_master['ระยะทาง'].sum()
             cash = daily_master['เงินสดเข้าตัว'].sum()
@@ -454,12 +444,10 @@ with tab2:
             total_target = target_income * days_count
             total_income_only = daily_master['รายรับรวม'].sum() 
             
-            # --- Display Targets ---
             st.markdown(f"**🎯 เป้าหมาย (รายรับ): {fmt_num(total_income_only)} / {fmt_num(total_target)} บาท**")
             progress = min(total_income_only / total_target, 1.0) if total_target > 0 else 0
             st.progress(progress, text=f"ทำได้แล้ว {progress*100:.1f}%")
 
-            # --- Display Metrics ---
             st.markdown("#### 💎 ประสิทธิภาพ & การเงิน")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("💰 กำไรสุทธิ", f"{fmt_num(net)} บ.", help="รายรับ - รายจ่าย")
@@ -475,7 +463,7 @@ with tab2:
             
             st.divider()
 
-            # --- 🟢 ส่วนกราฟ Drill Down ---
+            # --- Drill Down ---
             st.markdown("### 📈 เจาะลึกประวัติสถิติ (คลิกเลือกหัวข้อ)")
             chart_mode = st.radio(
                 "เลือกข้อมูลที่ต้องการดูกราฟ:",
@@ -501,43 +489,41 @@ with tab2:
 
             st.divider()
 
-            # --- 🟢 ส่วนวิเคราะห์ GP (แก้ไข Logic รวมทุกทาง) ---
+            # --- 🟢 (UPDATED) วิเคราะห์ GP ---
             with st.expander("💸 วิเคราะห์ความคุ้มค่า (GP & ค่าคอม)", expanded=True):
-                # 1. รายจ่าย: ดึงเฉพาะที่เกี่ยวกับแอป (ตัดค่าน้ำมัน/กินข้าวออก)
+                # 1. รายจ่ายจากการเติมเครดิต (ไม่รวมค่าน้ำมัน/กินข้าว)
                 app_expenses = exp_df[~exp_df['แอป'].isin(['ค่าใช้จ่าย', 'ระบบ'])].copy()
-                app_expenses['แอป'] = app_expenses['แอป'].replace({'Grab Wallet': 'Grab'}) # แก้ชื่อให้ตรง
+                app_expenses['แอป'] = app_expenses['แอป'].replace({'Grab Wallet': 'Grab'})
                 
-                # 2. รายรับ: ดึงมาทั้งหมด
+                # 2. รายได้จากงาน
                 app_incomes = inc_df.copy()
                 
                 if not app_incomes.empty:
                     gp_data = []
-                    # รวมรายชื่อแอปทั้งหมดที่มีความเคลื่อนไหว
                     all_apps = set(app_incomes['แอป'].unique()) | set(app_expenses['แอป'].unique())
-                    
                     for app in all_apps:
-                        # A. รายรับรวมหน้าแอป (Gross)
+                        # ยอดรวมราคาหน้าแอป
                         gross_income = app_incomes[app_incomes['แอป'] == app]['ยอดเต็ม/หน้าแอป'].sum()
                         
-                        # B. ต้นทุนจากการเติมเครดิต (Top-up Expense)
-                        cost_from_topup = app_expenses[app_expenses['แอป'] == app]['หัก/จ่าย'].sum()
+                        # A. หักจากรายจ่าย (เติมเครดิต)
+                        deduct_from_expense = app_expenses[app_expenses['แอป'] == app]['หัก/จ่าย'].sum()
                         
-                        # C. ต้นทุนจากการโดนหักหน้างาน (Deduction from Income)
-                        # เช่น ลูกค้าจ่ายบัตร 100 เราได้ 70 -> โดนหัก 30 (ระบบบันทึกในช่อง 'หัก/จ่าย' ของรายรับ)
-                        cost_from_deduction = app_incomes[app_incomes['แอป'] == app]['หัก/จ่าย'].sum()
+                        # B. หักจากรายรับ (โดนหักหน้างาน ตัดบัตร/แอป)
+                        # 🟢 จุดสำคัญ: รวมยอดหัก/จ่ายจากรายรับเข้าไปด้วย
+                        deduct_from_income = app_incomes[app_incomes['แอป'] == app]['หัก/จ่าย'].sum()
                         
-                        # รวมต้นทุนทั้งหมด
-                        total_cost = cost_from_topup + cost_from_deduction
-
+                        total_deduction = deduct_from_expense + deduct_from_income
+                        
                         if gross_income > 0:
-                            gp_pct = (total_cost / gross_income) * 100
+                            gp_pct = (total_deduction / gross_income) * 100
                             gp_data.append({
                                 "แอป": app, 
                                 "GP (%)": gp_pct, 
-                                "โดนหักรวม (บ.)": total_cost, 
+                                "รวมต้นทุน (บ.)": total_deduction,
+                                "หักหน้างาน (บ.)": deduct_from_income, # แสดงให้เห็นชัดๆ
+                                "เติมเครดิต (บ.)": deduct_from_expense, # แสดงให้เห็นชัดๆ
                                 "ยอดหน้าแอป (บ.)": gross_income
                             })
-                    
                     if gp_data:
                         gp_df = pd.DataFrame(gp_data).sort_values(by="GP (%)", ascending=True)
                         c_gp1, c_gp2 = st.columns([1, 2])
@@ -546,32 +532,22 @@ with tab2:
                                 gp_df, 
                                 column_config={
                                     "GP (%)": st.column_config.NumberColumn(format="%.1f %%"),
-                                    "โดนหักรวม (บ.)": st.column_config.NumberColumn(format="%.0f", help="รวมทั้งเติมเครดิต และโดนหักจากยอดงาน"), 
+                                    "รวมต้นทุน (บ.)": st.column_config.NumberColumn(format="%.0f"),
+                                    "หักหน้างาน (บ.)": st.column_config.NumberColumn(format="%.0f", help="โดนหักทันทีจากงานตัดบัตร"),
+                                    "เติมเครดิต (บ.)": st.column_config.NumberColumn(format="%.0f", help="เติมเงินเข้าแอป"),
                                     "ยอดหน้าแอป (บ.)": st.column_config.NumberColumn(format="%.0f")
                                 }, 
                                 hide_index=True, 
                                 use_container_width=True
                             )
                         with c_gp2: 
-                            st.plotly_chart(
-                                px.bar(
-                                    gp_df, 
-                                    x='GP (%)', 
-                                    y='แอป', 
-                                    orientation='h', 
-                                    title="📉 เปรียบเทียบ % ค่าคอมมิชชั่นจริง (Total Cost)", 
-                                    text_auto='.1f', 
-                                    color='GP (%)', 
-                                    color_continuous_scale='Reds'
-                                ), 
-                                use_container_width=True
-                            )
+                            st.plotly_chart(px.bar(gp_df, x='GP (%)', y='แอป', orientation='h', title="📉 ต้นทุนแอป (รวมเติมเงิน + โดนหักหน้างาน)", text_auto='.1f', color='GP (%)', color_continuous_scale='Reds'), use_container_width=True)
                     else: st.info("ข้อมูลไม่เพียงพอ")
                 else: st.info("ไม่มีข้อมูลรายรับ")
 
             st.divider()
 
-            # --- กราฟวงกลม & Heatmap ---
+            # --- Pie & Heatmap ---
             APP_COLORS = { "Grab": "#00B14F", "Line Man": "#06C755", "Bolt": "#34D186", "Maxim": "#FFD600", "Robinhood": "#9D2398", "Win": "#FF6B00", "งานนอก": "#7F8C8D", "ระบบ": "#95A5A6" }
             c_pie, c_heat = st.columns(2)
             with c_pie:
@@ -585,7 +561,7 @@ with tab2:
                     if not hm.empty:
                         st.plotly_chart(px.imshow(hm, title="🔥 ช่วงเวลาทำเงิน", aspect="auto", color_continuous_scale="Greens"), use_container_width=True)
 
-            # --- กราฟรายจ่ายเจาะลึก ---
+            # --- Expense Chart ---
             st.markdown("### 💸 รายจ่าย (เจาะลึก)")
             if not exp_df.empty:
                 def detailed_expense_name(row):
@@ -620,9 +596,9 @@ with tab2:
 
         else: st.warning(f"🔍 ไม่พบข้อมูล ({time_filter})")
     else: st.info("เริ่มบันทึกงานแรกได้เลย")
-                
+
 # ==========================================
-# TAB 3: ฐานข้อมูล (Performance Upgrade)
+# TAB 3: ฐานข้อมูล (Performance)
 # ==========================================
 with tab3:
     st.subheader("🗂️ ฐานข้อมูล")
@@ -634,7 +610,6 @@ with tab3:
         
         f_app = c1.multiselect("แอป", apps)
         f_cat = c2.multiselect("หมวดหมู่", cats)
-        # 🟢 แก้ไข: ตั้งค่าเริ่มต้นเป็น "เดือนนี้" เพื่อไม่ให้โหลดหนักเกินไป
         f_date = c3.selectbox("วันที่", ["เดือนนี้", "วันนี้", "ทั้งหมด"])
 
     df_show = st.session_state.data.copy()
@@ -672,4 +647,3 @@ with tab3:
             except Exception as e: st.error(f"Error: {e}")
     else:
         st.info("ไม่มีข้อมูลให้แสดง")
-
